@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { ColumnVisibilityMenu, useColumnVisibility, type ColumnDef } from "@/components/dashboard/table-toolbar";
 import { downloadBrandedPdf, downloadBrandedXlsx, seededRandom } from "@/lib/reports";
 import {
   computeActorPayout,
@@ -27,6 +28,15 @@ import {
 } from "@/lib/metrics";
 
 const ROLE_TABS = PAYOUT_ELIGIBLE_ROLES;
+
+const payoutStatusFilters = ["ALL", "PENDING", "PAID"] as const;
+const payoutStatusFilterLabels: Record<(typeof payoutStatusFilters)[number], string> = { ALL: "Todos", PENDING: "Pendentes", PAID: "Pagos" };
+
+const payoutColumns: ColumnDef<"received" | "commission" | "status">[] = [
+  { key: "received", label: "Recebido no período" },
+  { key: "commission", label: "Comissão calculada" },
+  { key: "status", label: "Status" },
+];
 
 const rolePluralLabels: Record<(typeof ROLE_TABS)[number], string> = {
   PARTNER: "Parceiros",
@@ -134,6 +144,9 @@ export function PayoutsSection({ actors, subscriptions, payments, customers }: {
   const [rates, setRates] = useState<CommissionRate[]>([]);
   const [payouts, setPayouts] = useState<ActorPayout[]>([]);
   const [selectedActorIds, setSelectedActorIds] = useState<Set<string>>(new Set());
+  const [payoutStatusFilter, setPayoutStatusFilter] = useState<(typeof payoutStatusFilters)[number]>("ALL");
+  const [nameSearch, setNameSearch] = useState("");
+  const columns = useColumnVisibility(payoutColumns);
   const [reportFormat, setReportFormat] = useState<"pdf" | "xlsx">("pdf");
   const [demoMode, setDemoMode] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -172,7 +185,12 @@ export function PayoutsSection({ actors, subscriptions, payments, customers }: {
   const totalPaid = rows.reduce((sum, row) => sum + (row.paidRecord ? row.paidRecord.amount : 0), 0);
   const pendingCount = rows.filter((row) => !row.paidRecord && row.computed.commission > 0).length;
 
-  const allVisibleSelected = rows.length > 0 && rows.every((row) => selectedActorIds.has(row.actor.id));
+  const nameTerm = nameSearch.trim().toLowerCase();
+  const visibleRows = rows
+    .filter((row) => payoutStatusFilter === "ALL" || (payoutStatusFilter === "PAID" ? row.paidRecord !== null : row.paidRecord === null))
+    .filter((row) => !nameTerm || row.actor.name.toLowerCase().includes(nameTerm));
+
+  const allVisibleSelected = visibleRows.length > 0 && visibleRows.every((row) => selectedActorIds.has(row.actor.id));
 
   function toggleActorSelected(actorId: string, checked: boolean) {
     setSelectedActorIds((current) => {
@@ -185,7 +203,7 @@ export function PayoutsSection({ actors, subscriptions, payments, customers }: {
   function toggleAllVisible() {
     setSelectedActorIds((current) => {
       const next = new Set(current);
-      for (const row of rows) { if (allVisibleSelected) next.delete(row.actor.id); else next.add(row.actor.id); }
+      for (const row of visibleRows) { if (allVisibleSelected) next.delete(row.actor.id); else next.add(row.actor.id); }
       return next;
     });
   }
@@ -394,20 +412,29 @@ export function PayoutsSection({ actors, subscriptions, payments, customers }: {
           <h2 className="font-semibold">Repasses — {rolePluralLabels[role]}</h2>
           <p className="mt-1 text-sm text-slate-500">% de comissão sobre o MRR do plano. Anual: distribuída pelos 12 meses do ciclo enquanto a assinatura estiver ativa, independente de ter sido pago em 1x, 8x, 10x ou 12x. Mensal: só no mês em que o pagamento é confirmado.</p>
         </div>
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 p-4">
+          {payoutStatusFilters.map((value) => (
+            <button key={value} onClick={() => setPayoutStatusFilter(value)} className={`rounded-lg px-3 py-1.5 text-sm ${payoutStatusFilter === value ? "bg-[#eaf1fc] text-[#2c4a80]" : "text-slate-500 hover:bg-slate-50"}`}>
+              {payoutStatusFilterLabels[value]}
+            </button>
+          ))}
+          <Input className="ml-auto w-56" placeholder="Buscar pelo nome" value={nameSearch} onChange={(event) => setNameSearch(event.target.value)} />
+          <ColumnVisibilityMenu defs={payoutColumns} isVisible={columns.isVisible} toggle={columns.toggle} />
+        </div>
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead className="w-10"><Checkbox checked={allVisibleSelected} onCheckedChange={toggleAllVisible} /></TableHead>
               <TableHead>Nome</TableHead>
-              <TableHead className="text-right">Recebido no período</TableHead>
-              <TableHead className="text-right">Comissão calculada</TableHead>
-              <TableHead>Status</TableHead>
+              {columns.isVisible("received") && <TableHead className="text-right">Recebido no período</TableHead>}
+              {columns.isVisible("commission") && <TableHead className="text-right">Comissão calculada</TableHead>}
+              {columns.isVisible("status") && <TableHead>Status</TableHead>}
               <TableHead />
             </TableRow>
           </TableHeader>
           <TableBody>
-            {rows.length === 0 && <TableRow><TableCell colSpan={6} className="text-center text-sm text-slate-500">Nenhum registro em {rolePluralLabels[role].toLowerCase()} ainda.</TableCell></TableRow>}
-            {rows.map(({ actor, computed, paidRecord }) => (
+            {visibleRows.length === 0 && <TableRow><TableCell colSpan={columns.visibleCount + 3} className="text-center text-sm text-slate-500">Nenhum registro em {rolePluralLabels[role].toLowerCase()} nesse filtro.</TableCell></TableRow>}
+            {visibleRows.map(({ actor, computed, paidRecord }) => (
               <TableRow key={actor.id}>
                 <TableCell><Checkbox checked={selectedActorIds.has(actor.id)} onCheckedChange={(checked) => toggleActorSelected(actor.id, checked === true)} /></TableCell>
                 <TableCell>
@@ -416,15 +443,17 @@ export function PayoutsSection({ actors, subscriptions, payments, customers }: {
                     <p className="mt-0.5 flex items-center gap-1 text-xs text-amber-600"><TriangleAlert className="size-3" />{computed.untaxedCount} pagamento(s) sem taxa definida (não incluídos)</p>
                   )}
                 </TableCell>
-                <TableCell className="text-right">{money.format(computed.grossReceived)}</TableCell>
-                <TableCell className="text-right font-medium">{money.format(computed.commission)}</TableCell>
-                <TableCell>
-                  {paidRecord ? (
-                    <Badge variant="outline" className="border-[#3b82f6]/30 text-[#3b82f6]">Pago em {new Date(paidRecord.paid_at).toLocaleDateString("pt-BR")} · {money.format(paidRecord.amount)}</Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-slate-500">Pendente</Badge>
-                  )}
-                </TableCell>
+                {columns.isVisible("received") && <TableCell className="text-right">{money.format(computed.grossReceived)}</TableCell>}
+                {columns.isVisible("commission") && <TableCell className="text-right font-medium">{money.format(computed.commission)}</TableCell>}
+                {columns.isVisible("status") && (
+                  <TableCell>
+                    {paidRecord ? (
+                      <Badge variant="outline" className="border-[#3b82f6]/30 text-[#3b82f6]">Pago em {new Date(paidRecord.paid_at).toLocaleDateString("pt-BR")} · {money.format(paidRecord.amount)}</Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-slate-500">Pendente</Badge>
+                    )}
+                  </TableCell>
+                )}
                 <TableCell>
                   <div className="flex items-center justify-end gap-1">
                     <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={() => setHistoryActor(actor)}><History className="size-3.5" />Histórico</Button>

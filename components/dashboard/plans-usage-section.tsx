@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge } from "@/components/dashboard/status-badge";
+import { ColumnVisibilityMenu, useColumnVisibility, type ColumnDef } from "@/components/dashboard/table-toolbar";
 import { money, planKindLabels, type CommercialActor, type PaymentLink, type Plan } from "@/lib/metrics";
 
 const linkFilters = ["ALL", "PENDING", "ACTIVE", "INACTIVE"] as const;
@@ -15,6 +16,26 @@ const linkFilterLabels: Record<(typeof linkFilters)[number], string> = { ALL: "T
 
 const planKindFilters = ["ALL", "RECURRING", "IMPLEMENTATION"] as const;
 const planKindFilterLabels: Record<(typeof planKindFilters)[number], string> = { ALL: "Todos", RECURRING: "Planos recorrentes", IMPLEMENTATION: "Implantações" };
+
+const planStatusFilters = ["ALL", "ACTIVE", "INACTIVE"] as const;
+const planStatusFilterLabels: Record<(typeof planStatusFilters)[number], string> = { ALL: "Todos", ACTIVE: "Ativos", INACTIVE: "Inativos" };
+
+const planColumns: ColumnDef<"kind" | "billingPeriod" | "value" | "installments" | "activeLinks" | "status">[] = [
+  { key: "kind", label: "Tipo" },
+  { key: "billingPeriod", label: "Periodicidade" },
+  { key: "value", label: "Preço padrão" },
+  { key: "installments", label: "Parcelamento" },
+  { key: "activeLinks", label: "Links ativos" },
+  { key: "status", label: "Status" },
+];
+
+const linkColumns: ColumnDef<"actor" | "plan" | "value" | "source" | "status">[] = [
+  { key: "actor", label: "Ator" },
+  { key: "plan", label: "Plano" },
+  { key: "value", label: "Valor" },
+  { key: "source", label: "Origem" },
+  { key: "status", label: "Status" },
+];
 
 export function PlansUsageSection({ links, actors, onChanged }: { links: PaymentLink[]; actors: CommercialActor[]; onChanged: () => void }) {
   return (
@@ -32,6 +53,8 @@ function PlansPanel({ links }: { links: PaymentLink[] }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({ code: "", name: "", kind: "RECURRING" as "RECURRING" | "IMPLEMENTATION", billingPeriod: "MONTHLY" as "MONTHLY" | "ANNUAL", standardValue: "", annualInstallmentLimit: "6" });
   const [kindFilter, setKindFilter] = useState<(typeof planKindFilters)[number]>("ALL");
+  const [statusFilter, setStatusFilter] = useState<(typeof planStatusFilters)[number]>("ALL");
+  const columns = useColumnVisibility(planColumns);
 
   async function loadPlans() {
     // No setState before this first await: keeps this effect-safe per
@@ -134,25 +157,42 @@ function PlansPanel({ links }: { links: PaymentLink[] }) {
         {showInstallments && <Input className="w-24" type="number" min="1" max="12" placeholder="Até Nx" value={form.annualInstallmentLimit} onChange={(event) => setForm((current) => ({ ...current, annualInstallmentLimit: event.target.value }))} />}
         <Button disabled={creating || !form.code.trim() || !form.name.trim() || !(Number(form.standardValue) > 0)} onClick={createPlan} className="bg-[#3a5d9d] text-white hover:bg-[#2c4a80]">{creating ? "Criando…" : "+ Novo plano"}</Button>
       </div>
-      <div className="flex flex-wrap gap-2 border-b border-slate-100 p-4">
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 p-4">
         {planKindFilters.map((value) => (
           <button key={value} onClick={() => setKindFilter(value)} className={`rounded-lg px-3 py-1.5 text-sm ${kindFilter === value ? "bg-[#eaf1fc] text-[#2c4a80]" : "text-slate-500 hover:bg-slate-50"}`}>
             {planKindFilterLabels[value]}
           </button>
         ))}
+        <span className="h-5 w-px bg-slate-200" />
+        {planStatusFilters.map((value) => (
+          <button key={value} onClick={() => setStatusFilter(value)} className={`rounded-lg px-3 py-1.5 text-sm ${statusFilter === value ? "bg-[#eaf1fc] text-[#2c4a80]" : "text-slate-500 hover:bg-slate-50"}`}>
+            {planStatusFilterLabels[value]}
+          </button>
+        ))}
+        <ColumnVisibilityMenu defs={planColumns} isVisible={columns.isVisible} toggle={columns.toggle} />
       </div>
       <Table>
         <TableHeader>
-          <TableRow><TableHead>Plano</TableHead><TableHead>Tipo</TableHead><TableHead>Periodicidade</TableHead><TableHead className="text-right">Preço padrão</TableHead><TableHead>Parcelamento</TableHead><TableHead className="text-right">Links ativos</TableHead><TableHead>Status</TableHead><TableHead /></TableRow>
+          <TableRow>
+            <TableHead>Plano</TableHead>
+            {columns.isVisible("kind") && <TableHead>Tipo</TableHead>}
+            {columns.isVisible("billingPeriod") && <TableHead>Periodicidade</TableHead>}
+            {columns.isVisible("value") && <TableHead className="text-right">Preço padrão</TableHead>}
+            {columns.isVisible("installments") && <TableHead>Parcelamento</TableHead>}
+            {columns.isVisible("activeLinks") && <TableHead className="text-right">Links ativos</TableHead>}
+            {columns.isVisible("status") && <TableHead>Status</TableHead>}
+            <TableHead />
+          </TableRow>
         </TableHeader>
         <TableBody>
-          {!loading && plans.length === 0 && <TableRow><TableCell colSpan={8} className="text-center text-sm text-slate-500">Nenhum plano cadastrado ainda.</TableCell></TableRow>}
-          {plans.filter((plan) => kindFilter === "ALL" || plan.kind === kindFilter).map((plan) => (
+          {!loading && plans.length === 0 && <TableRow><TableCell colSpan={columns.visibleCount + 2} className="text-center text-sm text-slate-500">Nenhum plano cadastrado ainda.</TableCell></TableRow>}
+          {plans.filter((plan) => (kindFilter === "ALL" || plan.kind === kindFilter) && (statusFilter === "ALL" || plan.status === statusFilter)).map((plan) => (
             <PlanRow
               key={plan.id}
               plan={plan}
               activeLinks={activeLinkCountByPlan.get(plan.id) ?? 0}
               editing={editingId === plan.id}
+              visibleColumns={columns.isVisible}
               onEdit={() => setEditingId(plan.id)}
               onCancelEdit={() => setEditingId(null)}
               onSave={(patch) => savePlanEdit(plan, patch)}
@@ -165,10 +205,11 @@ function PlansPanel({ links }: { links: PaymentLink[] }) {
   );
 }
 
-function PlanRow({ plan, activeLinks, editing, onEdit, onCancelEdit, onSave, onToggleStatus }: {
+function PlanRow({ plan, activeLinks, editing, visibleColumns, onEdit, onCancelEdit, onSave, onToggleStatus }: {
   plan: Plan;
   activeLinks: number;
   editing: boolean;
+  visibleColumns: (key: "kind" | "billingPeriod" | "value" | "installments" | "activeLinks" | "status") => boolean;
   onEdit: () => void;
   onCancelEdit: () => void;
   onSave: (patch: { name: string; standardValue: string; annualInstallmentLimit: string }) => void;
@@ -184,12 +225,12 @@ function PlanRow({ plan, activeLinks, editing, onEdit, onCancelEdit, onSave, onT
     return (
       <TableRow>
         <TableCell><Input value={name} onChange={(event) => setName(event.target.value)} /></TableCell>
-        <TableCell><Badge variant="outline" className={plan.kind === "IMPLEMENTATION" ? "border-violet-200 bg-violet-50 text-violet-700" : undefined}>{planKindLabels[plan.kind]}</Badge></TableCell>
-        <TableCell><Badge variant="outline">{billingPeriodLabel}</Badge></TableCell>
-        <TableCell className="text-right"><Input className="text-right" type="number" min="0.01" step="0.01" value={standardValue} onChange={(event) => setStandardValue(event.target.value)} /></TableCell>
-        <TableCell>{showInstallments ? <Input type="number" min="1" max="12" value={annualInstallmentLimit} onChange={(event) => setAnnualInstallmentLimit(event.target.value)} /> : "—"}</TableCell>
-        <TableCell className="text-right">{activeLinks}</TableCell>
-        <TableCell><StatusBadge status={plan.status} /></TableCell>
+        {visibleColumns("kind") && <TableCell><Badge variant="outline" className={plan.kind === "IMPLEMENTATION" ? "border-violet-200 bg-violet-50 text-violet-700" : undefined}>{planKindLabels[plan.kind]}</Badge></TableCell>}
+        {visibleColumns("billingPeriod") && <TableCell><Badge variant="outline">{billingPeriodLabel}</Badge></TableCell>}
+        {visibleColumns("value") && <TableCell className="text-right"><Input className="text-right" type="number" min="0.01" step="0.01" value={standardValue} onChange={(event) => setStandardValue(event.target.value)} /></TableCell>}
+        {visibleColumns("installments") && <TableCell>{showInstallments ? <Input type="number" min="1" max="12" value={annualInstallmentLimit} onChange={(event) => setAnnualInstallmentLimit(event.target.value)} /> : "—"}</TableCell>}
+        {visibleColumns("activeLinks") && <TableCell className="text-right">{activeLinks}</TableCell>}
+        {visibleColumns("status") && <TableCell><StatusBadge status={plan.status} /></TableCell>}
         <TableCell className="flex justify-end gap-1.5">
           <Button size="sm" variant="ghost" onClick={onCancelEdit}>Cancelar</Button>
           <Button size="sm" onClick={() => onSave({ name, standardValue, annualInstallmentLimit })}>Salvar</Button>
@@ -201,12 +242,12 @@ function PlanRow({ plan, activeLinks, editing, onEdit, onCancelEdit, onSave, onT
   return (
     <TableRow>
       <TableCell className="font-medium">{plan.name} <span className="text-xs text-slate-400">· {plan.code}</span></TableCell>
-      <TableCell><Badge variant="outline" className={plan.kind === "IMPLEMENTATION" ? "border-violet-200 bg-violet-50 text-violet-700" : undefined}>{planKindLabels[plan.kind]}</Badge></TableCell>
-      <TableCell><Badge variant="outline">{billingPeriodLabel}</Badge></TableCell>
-      <TableCell className="text-right">{money.format(plan.standard_value)}</TableCell>
-      <TableCell>{plan.annual_installment_limit ? `até ${plan.annual_installment_limit}x` : "—"}</TableCell>
-      <TableCell className="text-right">{activeLinks}</TableCell>
-      <TableCell><StatusBadge status={plan.status} /></TableCell>
+      {visibleColumns("kind") && <TableCell><Badge variant="outline" className={plan.kind === "IMPLEMENTATION" ? "border-violet-200 bg-violet-50 text-violet-700" : undefined}>{planKindLabels[plan.kind]}</Badge></TableCell>}
+      {visibleColumns("billingPeriod") && <TableCell><Badge variant="outline">{billingPeriodLabel}</Badge></TableCell>}
+      {visibleColumns("value") && <TableCell className="text-right">{money.format(plan.standard_value)}</TableCell>}
+      {visibleColumns("installments") && <TableCell>{plan.annual_installment_limit ? `até ${plan.annual_installment_limit}x` : "—"}</TableCell>}
+      {visibleColumns("activeLinks") && <TableCell className="text-right">{activeLinks}</TableCell>}
+      {visibleColumns("status") && <TableCell><StatusBadge status={plan.status} /></TableCell>}
       <TableCell className="flex justify-end gap-1.5">
         <Button size="sm" variant="ghost" onClick={onEdit}>Editar</Button>
         <Button size="sm" variant="outline" onClick={onToggleStatus}>{plan.status === "ACTIVE" ? "Desativar" : "Ativar"}</Button>
@@ -218,8 +259,10 @@ function PlanRow({ plan, activeLinks, editing, onEdit, onCancelEdit, onSave, onT
 function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors: CommercialActor[]; onChanged: () => void }) {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [filter, setFilter] = useState<(typeof linkFilters)[number]>("PENDING");
+  const [actorFilter, setActorFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [syncing, setSyncing] = useState(false);
+  const columns = useColumnVisibility(linkColumns);
 
   useEffect(() => {
     fetch("/api/plans?status=all").then((response) => response.json()).then((data) => setPlans(data.plans ?? [])).catch(() => setPlans([]));
@@ -229,6 +272,7 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
   const term = search.trim().toLowerCase();
   const filtered = links
     .filter((link) => filter === "ALL" || link.status === filter)
+    .filter((link) => actorFilter === "all" || link.actor_id === actorFilter)
     .filter((link) => !term || link.display_name.toLowerCase().includes(term));
   const pendingCount = links.filter((link) => link.status === "PENDING").length;
 
@@ -271,14 +315,29 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
             {linkFilterLabels[value]}{value === "PENDING" && pendingCount > 0 ? ` (${pendingCount})` : ""}
           </button>
         ))}
+        <Select value={actorFilter} onValueChange={setActorFilter}>
+          <SelectTrigger className="w-44"><SelectValue placeholder="Ator" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos os atores</SelectItem>
+            {actors.map((actor) => <SelectItem key={actor.id} value={actor.id}>{actor.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
         <Input className="ml-auto w-56" placeholder="Buscar pelo nome do link" value={search} onChange={(event) => setSearch(event.target.value)} />
+        <ColumnVisibilityMenu defs={linkColumns} isVisible={columns.isVisible} toggle={columns.toggle} />
       </div>
       <Table>
         <TableHeader>
-          <TableRow><TableHead>Link</TableHead><TableHead>Ator</TableHead><TableHead>Plano</TableHead><TableHead className="text-right">Valor</TableHead><TableHead>Origem</TableHead><TableHead>Status</TableHead></TableRow>
+          <TableRow>
+            <TableHead>Link</TableHead>
+            {columns.isVisible("actor") && <TableHead>Ator</TableHead>}
+            {columns.isVisible("plan") && <TableHead>Plano</TableHead>}
+            {columns.isVisible("value") && <TableHead className="text-right">Valor</TableHead>}
+            {columns.isVisible("source") && <TableHead>Origem</TableHead>}
+            {columns.isVisible("status") && <TableHead>Status</TableHead>}
+          </TableRow>
         </TableHeader>
         <TableBody>
-          {filtered.length === 0 && <TableRow><TableCell colSpan={6} className="text-center text-sm text-slate-500">Nenhum link nesse filtro.</TableCell></TableRow>}
+          {filtered.length === 0 && <TableRow><TableCell colSpan={columns.visibleCount + 1} className="text-center text-sm text-slate-500">Nenhum link nesse filtro.</TableCell></TableRow>}
           {filtered.map((link) => {
             const boundPlan = link.plan_id ? planById.get(link.plan_id) : undefined;
             return (
@@ -287,27 +346,31 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
                 {link.display_name}
                 {boundPlan?.kind === "IMPLEMENTATION" && <Badge variant="outline" className="ml-2 border-violet-200 bg-violet-50 text-[10px] text-violet-700">Implantação</Badge>}
               </TableCell>
-              <TableCell>
-                <Select value={link.actor_id ?? "none"} onValueChange={(value) => bind(link, { actorId: value === "none" ? null : value })}>
-                  <SelectTrigger className="w-44"><SelectValue placeholder="Sem ator" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Sem ator</SelectItem>
-                    {actors.map((actor) => <SelectItem key={actor.id} value={actor.id}>{actor.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </TableCell>
-              <TableCell>
-                <Select value={link.plan_id ?? "none"} onValueChange={(value) => bind(link, { planId: value === "none" ? null : value })}>
-                  <SelectTrigger className="w-44"><SelectValue placeholder="Sem plano" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Sem plano</SelectItem>
-                    {plans.map((plan) => <SelectItem key={plan.id} value={plan.id}>{plan.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </TableCell>
-              <TableCell className="text-right text-sm">{money.format(link.value)}<span className="ml-1 text-xs text-slate-400">{link.billing_period === "ANNUAL" ? "/ano" : link.billing_period === "ONE_TIME" ? " · taxa única" : "/mês"}</span></TableCell>
-              <TableCell className="text-xs text-slate-500">{link.source === "ASAAS_SYNC" ? "Importado do Asaas" : "Gerado aqui"}</TableCell>
-              <TableCell><StatusBadge status={link.status} /></TableCell>
+              {columns.isVisible("actor") && (
+                <TableCell>
+                  <Select value={link.actor_id ?? "none"} onValueChange={(value) => bind(link, { actorId: value === "none" ? null : value })}>
+                    <SelectTrigger className="w-44"><SelectValue placeholder="Sem ator" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Sem ator</SelectItem>
+                      {actors.map((actor) => <SelectItem key={actor.id} value={actor.id}>{actor.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </TableCell>
+              )}
+              {columns.isVisible("plan") && (
+                <TableCell>
+                  <Select value={link.plan_id ?? "none"} onValueChange={(value) => bind(link, { planId: value === "none" ? null : value })}>
+                    <SelectTrigger className="w-44"><SelectValue placeholder="Sem plano" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Sem plano</SelectItem>
+                      {plans.map((plan) => <SelectItem key={plan.id} value={plan.id}>{plan.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </TableCell>
+              )}
+              {columns.isVisible("value") && <TableCell className="text-right text-sm">{money.format(link.value)}<span className="ml-1 text-xs text-slate-400">{link.billing_period === "ANNUAL" ? "/ano" : link.billing_period === "ONE_TIME" ? " · taxa única" : "/mês"}</span></TableCell>}
+              {columns.isVisible("source") && <TableCell className="text-xs text-slate-500">{link.source === "ASAAS_SYNC" ? "Importado do Asaas" : "Gerado aqui"}</TableCell>}
+              {columns.isVisible("status") && <TableCell><StatusBadge status={link.status} /></TableCell>}
             </TableRow>
             );
           })}

@@ -12,8 +12,17 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { ColumnVisibilityMenu, useColumnVisibility, type ColumnDef } from "@/components/dashboard/table-toolbar";
 import { isPaidStatus, money, monthlyValue, roleLabels, type CommercialActor, type Customer, type ImplementationPayment, type Payment, type PaymentLink, type Subscription } from "@/lib/metrics";
 import { localDate } from "@/lib/customer-activity";
+
+const clientColumns: ColumnDef<"status" | "plan" | "mrr" | "actor" | "signedAt">[] = [
+  { key: "status", label: "Status" },
+  { key: "plan", label: "Plano" },
+  { key: "mrr", label: "MRR" },
+  { key: "actor", label: "Parceiro" },
+  { key: "signedAt", label: "Assinado em" },
+];
 
 const statusLabels: Record<Customer["status"], string> = { ACTIVE: "Ativo", CANCELLED: "Cancelado", FROZEN: "Congelado" };
 const statusBadgeClass: Record<Customer["status"], string> = {
@@ -41,6 +50,7 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
   const [actorFilter, setActorFilter] = useState<string>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [syncingAll, setSyncingAll] = useState(false);
+  const columns = useColumnVisibility(clientColumns);
 
   const actorName = (id: string | null) => actors.find((actor) => actor.id === id)?.name ?? "Orgânico / sem parceiro";
 
@@ -112,13 +122,21 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
               {actors.map((actor) => <SelectItem key={actor.id} value={actor.id}>{actor.name}</SelectItem>)}
             </SelectContent>
           </Select>
+          <ColumnVisibilityMenu defs={clientColumns} isVisible={columns.isVisible} toggle={columns.toggle} />
         </div>
         <Table>
           <TableHeader>
-            <TableRow><TableHead>Cliente</TableHead><TableHead>Status</TableHead><TableHead>Plano</TableHead><TableHead className="text-right">MRR</TableHead><TableHead>Parceiro</TableHead><TableHead>Assinado em</TableHead></TableRow>
+            <TableRow>
+              <TableHead>Cliente</TableHead>
+              {columns.isVisible("status") && <TableHead>Status</TableHead>}
+              {columns.isVisible("plan") && <TableHead>Plano</TableHead>}
+              {columns.isVisible("mrr") && <TableHead className="text-right">MRR</TableHead>}
+              {columns.isVisible("actor") && <TableHead>Parceiro</TableHead>}
+              {columns.isVisible("signedAt") && <TableHead>Assinado em</TableHead>}
+            </TableRow>
           </TableHeader>
           <TableBody>
-            {filtered.length === 0 && <TableRow><TableCell colSpan={6} className="text-center text-sm text-slate-500">Nenhum cliente encontrado.</TableCell></TableRow>}
+            {filtered.length === 0 && <TableRow><TableCell colSpan={columns.visibleCount + 1} className="text-center text-sm text-slate-500">Nenhum cliente encontrado.</TableCell></TableRow>}
             {filtered.map((customer) => {
               const subscription = activeSubscriptionByCustomer.get(customer.id);
               const mrr = subscription ? monthlyValue(subscription.value, subscription.billing_period) : 0;
@@ -128,11 +146,11 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
                     <button className="font-medium text-left hover:underline" aria-haspopup="dialog" onClick={() => setSelectedId(customer.id)}>{customer.office_name}</button>
                     <p className="text-xs text-slate-500">{customer.responsible_name ?? customer.email ?? "—"}</p>
                   </TableCell>
-                  <TableCell><Badge variant="outline" className={statusBadgeClass[customer.status]}>{statusLabels[customer.status]}</Badge></TableCell>
-                  <TableCell className="text-sm text-slate-600">{subscription?.plan_name_raw ?? "—"}</TableCell>
-                  <TableCell className="text-right text-sm font-medium">{mrr > 0 ? money.format(mrr) : "—"}</TableCell>
-                  <TableCell className="text-sm text-slate-600">{actorName(customer.acquisition_actor_id)}</TableCell>
-                  <TableCell className="text-sm text-slate-500">{fmtDate(customer.signed_at)}</TableCell>
+                  {columns.isVisible("status") && <TableCell><Badge variant="outline" className={statusBadgeClass[customer.status]}>{statusLabels[customer.status]}</Badge></TableCell>}
+                  {columns.isVisible("plan") && <TableCell className="text-sm text-slate-600">{subscription?.plan_name_raw ?? "—"}</TableCell>}
+                  {columns.isVisible("mrr") && <TableCell className="text-right text-sm font-medium">{mrr > 0 ? money.format(mrr) : "—"}</TableCell>}
+                  {columns.isVisible("actor") && <TableCell className="text-sm text-slate-600">{actorName(customer.acquisition_actor_id)}</TableCell>}
+                  {columns.isVisible("signedAt") && <TableCell className="text-sm text-slate-500">{fmtDate(customer.signed_at)}</TableCell>}
                 </TableRow>
               );
             })}

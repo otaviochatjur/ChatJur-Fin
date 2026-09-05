@@ -9,7 +9,18 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge } from "@/components/dashboard/status-badge";
 import { ActorWorkspace } from "@/components/dashboard/actor-workspace";
+import { ColumnVisibilityMenu, useColumnVisibility, type ColumnDef } from "@/components/dashboard/table-toolbar";
 import { actorCategoryLabel, money, type ActorMetrics, type CommercialActor, type Plan } from "@/lib/metrics";
+
+const actorStatusFilters = ["ALL", "ACTIVE", "INACTIVE"] as const;
+const actorStatusFilterLabels: Record<(typeof actorStatusFilters)[number], string> = { ALL: "Todos", ACTIVE: "Ativos", INACTIVE: "Inativos" };
+
+const actorRoleColumns: ColumnDef<"clients" | "mrr" | "links" | "status">[] = [
+  { key: "clients", label: "Clientes" },
+  { key: "mrr", label: "MRR" },
+  { key: "links", label: "Links" },
+  { key: "status", label: "Status" },
+];
 
 /**
  * Generic "list + workspace" layout shared by every commercial-actor
@@ -56,6 +67,14 @@ export function ActorRoleSection({
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<(typeof actorStatusFilters)[number]>("ALL");
+  const columns = useColumnVisibility(actorRoleColumns);
+
+  const term = search.trim().toLowerCase();
+  const filtered = scoped
+    .filter((actor) => statusFilter === "ALL" || actor.status === statusFilter)
+    .filter((actor) => !term || actor.name.toLowerCase().includes(term));
 
   const current = scoped.find((actor) => actor.id === selectedId);
   const currentMetrics = current ? metrics[current.id] ?? { clients: 0, mrr: 0, links: 0 } : { clients: 0, mrr: 0, links: 0 };
@@ -92,19 +111,37 @@ export function ActorRoleSection({
             </DialogContent>
           </Dialog>
         </div>
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 p-4">
+          {actorStatusFilters.map((value) => (
+            <button key={value} onClick={() => setStatusFilter(value)} className={`rounded-lg px-3 py-1.5 text-sm ${statusFilter === value ? "bg-[#eaf1fc] text-[#2c4a80]" : "text-slate-500 hover:bg-slate-50"}`}>
+              {actorStatusFilterLabels[value]}
+            </button>
+          ))}
+          <Input className="ml-auto w-56" placeholder="Buscar pelo nome" value={search} onChange={(event) => setSearch(event.target.value)} />
+          <ColumnVisibilityMenu defs={actorRoleColumns} isVisible={columns.isVisible} toggle={columns.toggle} />
+        </div>
         <Table>
-          <TableHeader><TableRow><TableHead>{columnLabel}</TableHead><TableHead className="text-right">Clientes</TableHead><TableHead className="text-right">MRR</TableHead><TableHead className="text-right">Links</TableHead><TableHead>Status</TableHead><TableHead /></TableRow></TableHeader>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{columnLabel}</TableHead>
+              {columns.isVisible("clients") && <TableHead className="text-right">Clientes</TableHead>}
+              {columns.isVisible("mrr") && <TableHead className="text-right">MRR</TableHead>}
+              {columns.isVisible("links") && <TableHead className="text-right">Links</TableHead>}
+              {columns.isVisible("status") && <TableHead>Status</TableHead>}
+              <TableHead />
+            </TableRow>
+          </TableHeader>
           <TableBody>
-            {scoped.length === 0 && <TableRow><TableCell colSpan={6} className="text-center text-sm text-slate-500">{emptyMessage}</TableCell></TableRow>}
-            {scoped.map((actor) => {
+            {filtered.length === 0 && <TableRow><TableCell colSpan={columns.visibleCount + 2} className="text-center text-sm text-slate-500">{scoped.length === 0 ? emptyMessage : "Nenhum cadastro nesse filtro."}</TableCell></TableRow>}
+            {filtered.map((actor) => {
               const actorMetrics = metrics[actor.id] ?? { clients: 0, mrr: 0, links: 0 };
               return (
                 <TableRow key={actor.id} className={actor.id === selectedId ? "bg-[#eef4fd]" : ""}>
                   <TableCell><button onClick={() => setSelectedId(actor.id)} className="text-left"><p className="font-medium">{actor.name}</p><p className="text-xs text-slate-500">{actorCategoryLabel(actor)}</p></button></TableCell>
-                  <TableCell className="text-right">{actorMetrics.clients}</TableCell>
-                  <TableCell className="text-right font-medium">{money.format(actorMetrics.mrr)}</TableCell>
-                  <TableCell className="text-right">{actorMetrics.links}</TableCell>
-                  <TableCell><StatusBadge status={actor.status} /></TableCell>
+                  {columns.isVisible("clients") && <TableCell className="text-right">{actorMetrics.clients}</TableCell>}
+                  {columns.isVisible("mrr") && <TableCell className="text-right font-medium">{money.format(actorMetrics.mrr)}</TableCell>}
+                  {columns.isVisible("links") && <TableCell className="text-right">{actorMetrics.links}</TableCell>}
+                  {columns.isVisible("status") && <TableCell><StatusBadge status={actor.status} /></TableCell>}
                   <TableCell><Button onClick={() => setSelectedId(actor.id)} variant="ghost" size="icon"><ChevronRight className="size-4" /><span className="sr-only">Abrir</span></Button></TableCell>
                 </TableRow>
               );
