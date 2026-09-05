@@ -7,9 +7,14 @@ const vite = await createServer({ appType: "custom", configFile: false, root, re
 after(() => vite.close());
 const { activitySchema, summarizeActivities } = await vite.ssrLoadModule("/lib/customer-activity.ts");
 const valid = { customerId: "00000000-0000-4000-8000-000000000001", type: "UPSELL", occurredOn: "2026-09-05", amount: 120, notes: "Mais licenças" };
-test("validates dates, money and required notes", () => {
+test("validates dates, money and optional notes (required only for cancellation)", () => {
   assert.equal(activitySchema.safeParse(valid).success, true);
-  for (const patch of [{ occurredOn: "2026-02-30" }, { amount: -1 }, { amount: 0 }, { amount: 1.001 }, { notes: " " }, { type: "UNKNOWN" }, { type: "FOLLOW_UP", amount: 10 }]) assert.equal(activitySchema.safeParse({ ...valid, ...patch }).success, false);
+  for (const patch of [{ occurredOn: "2026-02-30" }, { amount: -1 }, { amount: 0 }, { amount: 1.001 }, { type: "UNKNOWN" }, { type: "FOLLOW_UP", amount: 10 }]) assert.equal(activitySchema.safeParse({ ...valid, ...patch }).success, false);
+  assert.equal(activitySchema.safeParse({ ...valid, notes: " " }).success, true);
+  assert.equal(activitySchema.safeParse({ ...valid, type: "FOLLOW_UP", amount: 0, notes: "" }).success, true);
+  assert.equal(activitySchema.safeParse({ ...valid, type: "CANCELLATION", amount: 0, notes: "" }).success, false);
+  assert.equal(activitySchema.safeParse({ ...valid, type: "CANCELLATION", amount: 0, notes: " " }).success, false);
+  assert.equal(activitySchema.safeParse({ ...valid, type: "CANCELLATION", amount: 0, notes: "Cliente insatisfeito" }).success, true);
 });
 test("counts commercial events rather than distinct customers and separates revenue categories", () => {
   const result = summarizeActivities([{ ...valid, amount: 0.1 }, { ...valid, amount: 0.2 }, { ...valid, type: "RENEWAL", amount: 1500 }, { ...valid, type: "FOLLOW_UP", amount: 0 }]);

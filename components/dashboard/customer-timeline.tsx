@@ -72,7 +72,7 @@ export function CustomerTimeline({ customerId, subscriptions, events, onChanged 
         })}
         <p aria-live="polite" className="text-lg font-semibold text-blue-800">{type === "UPSELL" ? "Acréscimo total" : "Redução total"}: {money.format(total)}</p>
       </fieldset>}
-      <label className="block text-sm">O que mudou?<Textarea required maxLength={5000} value={notes} onChange={event => setNotes(event.target.value)} placeholder="Descreva a mudança, o plano e o período contratado ou os próximos passos." /></label>
+      <label className="block text-sm">Observações{type === "CANCELLATION" ? "" : " (opcional)"}<Textarea required={type === "CANCELLATION"} maxLength={5000} value={notes} onChange={event => setNotes(event.target.value)} placeholder={type === "CANCELLATION" ? "Descreva o motivo do cancelamento." : "Descreva a mudança, o plano e o período contratado ou os próximos passos."} /></label>
       <p className="text-xs text-slate-500">Este registro alimenta as métricas comerciais. Atualize o cadastro abaixo quando houver mudança de status; assinaturas e recebimentos continuam vinculados aos pagamentos.</p>
       <Button disabled={saving || (changingPlan && !subscription) || (itemized && (!items.length || total <= 0))} type="submit">{saving ? "Salvando…" : "Registrar acontecimento"}</Button>
     </form>
@@ -84,7 +84,7 @@ export function CustomerTimeline({ customerId, subscriptions, events, onChanged 
         {event.amount > 0 && <p className="mt-1 font-medium text-blue-700">{money.format(event.amount)}</p>}
         {event.planChange && <div className="mt-2 text-sm"><p>{event.planChange.before.name} ({event.planChange.before.period === "ANNUAL" ? "Anual" : "Mensal"}, {money.format(event.planChange.before.value)}) → {event.planChange.after.name} ({event.planChange.after.period === "ANNUAL" ? "Anual" : "Mensal"}, {money.format(event.planChange.after.value)})</p><p>Impacto no MRR: {money.format(planMrrDelta(event.planChange))} · Vigência: {event.occurredOn.split("-").reverse().join("/")}</p></div>}
         {event.items && <ul className="mt-2 space-y-1">{event.items.map(item => <li key={item.kind} className="flex justify-between gap-3"><span>{itemCatalog[item.kind].label}{item.quantity !== null ? ` · ${item.quantity}` : ""}</span><span>{money.format(item.amount)}</span></li>)}</ul>}
-        <p className="mt-1 whitespace-pre-wrap break-words text-slate-600">{event.notes}</p>
+        {event.notes && <p className="mt-1 whitespace-pre-wrap break-words text-slate-600">{event.notes}</p>}
       </article>)}</div>
     </div>
   </section>;
