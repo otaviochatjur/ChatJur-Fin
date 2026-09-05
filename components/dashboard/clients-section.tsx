@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { isPaidStatus, money, monthlyValue, roleLabels, type CommercialActor, type Customer, type Payment, type PaymentLink, type Subscription } from "@/lib/metrics";
+import { isPaidStatus, money, monthlyValue, roleLabels, type CommercialActor, type Customer, type ImplementationPayment, type Payment, type PaymentLink, type Subscription } from "@/lib/metrics";
 import { localDate } from "@/lib/customer-activity";
 
 const statusLabels: Record<Customer["status"], string> = { ACTIVE: "Ativo", CANCELLED: "Cancelado", FROZEN: "Congelado" };
@@ -26,10 +26,11 @@ function fmtDate(value: string | null) {
   return value ? new Date(value).toLocaleDateString("pt-BR") : "—";
 }
 
-export function ClientsSection({ customers, subscriptions, payments, actors, links, events, onChanged }: {
+export function ClientsSection({ customers, subscriptions, payments, implementationPayments, actors, links, events, onChanged }: {
   customers: Customer[];
   subscriptions: Subscription[];
   payments: Payment[];
+  implementationPayments: ImplementationPayment[];
   actors: CommercialActor[];
   links: PaymentLink[];
   events: CustomerActivity[];
@@ -65,6 +66,7 @@ export function ClientsSection({ customers, subscriptions, payments, actors, lin
   const selected = customers.find((customer) => customer.id === selectedId) ?? null;
   const selectedSubscriptions = selected ? subscriptions.filter((subscription) => subscription.customer_id === selected.id) : [];
   const selectedPayments = selected ? payments.filter((payment) => payment.customer_id === selected.id) : [];
+  const selectedImplementationPayments = selected ? implementationPayments.filter((payment) => payment.customer_id === selected.id) : [];
 
   async function syncAllPayments() {
     setSyncingAll(true);
@@ -146,6 +148,7 @@ export function ClientsSection({ customers, subscriptions, payments, actors, lin
             customer={selected}
             subscriptions={selectedSubscriptions}
             payments={selectedPayments}
+            implementationPayments={selectedImplementationPayments}
             actors={actors}
             links={links}
             events={events.filter(event => event.customerId === selected.id)}
@@ -158,10 +161,11 @@ export function ClientsSection({ customers, subscriptions, payments, actors, lin
   );
 }
 
-function ClientDetail({ customer, subscriptions, payments, actors, links, events, onChanged }: {
+function ClientDetail({ customer, subscriptions, payments, implementationPayments, actors, links, events, onChanged }: {
   customer: Customer;
   subscriptions: Subscription[];
   payments: Payment[];
+  implementationPayments: ImplementationPayment[];
   actors: CommercialActor[];
   links: PaymentLink[];
   events: CustomerActivity[];
@@ -250,6 +254,23 @@ function ClientDetail({ customer, subscriptions, payments, actors, links, events
               <span className={isPaidStatus(payment.status) ? "text-emerald-700" : "text-slate-500"}>{payment.status}</span>
               <span className="text-slate-500">{fmtDate(payment.payment_date ?? payment.due_date)}</span>
               <span className="font-medium">{money.format(payment.value)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-2 rounded-xl border border-violet-200 bg-violet-50/30 p-3">
+        <p className="text-xs font-medium uppercase tracking-[0.14em] text-violet-700">Implantações ({implementationPayments.length})</p>
+        {implementationPayments.length === 0 && <p className="text-sm text-slate-500">Nenhuma taxa de implantação (API Oficial, Claude/IA, etc.) registrada para este cliente.</p>}
+        <div className="max-h-48 space-y-1.5 overflow-y-auto">
+          {implementationPayments.slice(0, 20).map((payment) => (
+            <div key={payment.id} className="text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className={isPaidStatus(payment.status) ? "text-emerald-700" : "text-slate-500"}>{payment.status}</span>
+                <span className="text-slate-500">{fmtDate(payment.payment_date ?? payment.due_date)}</span>
+                <span className="font-medium">{money.format(payment.value)}</span>
+              </div>
+              <p className="truncate text-xs text-slate-500" title={payment.description}>{payment.description}</p>
             </div>
           ))}
         </div>

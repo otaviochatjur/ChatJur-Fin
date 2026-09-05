@@ -2,7 +2,17 @@ import { fetchAsaasCustomer, type AsaasCustomer, type AsaasPayment } from "@/lib
 import { findClientInSheet } from "@/lib/clients-allowlist";
 import { supabaseRequest } from "@/lib/supabase-server";
 
-type PaymentLinkRow = { id: string; actor_id: string | null; plan_id: string | null; custom_plan_id: string | null; display_name: string; billing_period: "MONTHLY" | "ANNUAL"; value: number };
+type PaymentLinkRow = {
+  id: string;
+  actor_id: string | null;
+  plan_id: string | null;
+  custom_plan_id: string | null;
+  display_name: string;
+  billing_period: "MONTHLY" | "ANNUAL" | "ONE_TIME";
+  value: number;
+  /** Kind of the bound plan, if any — 'IMPLEMENTATION' routes the payment to `implementation_payments` instead of subscriptions/payments. Unbound links (plan_id null) behave like RECURRING, matching prior behavior. */
+  plan_kind: "RECURRING" | "IMPLEMENTATION" | null;
+};
 type CustomerRow = { id: string; email: string | null; asaas_customer_id: string | null; acquisition_actor_id: string | null; status: string };
 type SubscriptionRow = { id: string; status: string; asaas_subscription_id: string | null; asaas_installment_id: string | null };
 
@@ -13,11 +23,16 @@ async function findOne<T>(path: string): Promise<T | null> {
   return rows[0] ?? null;
 }
 
+type PaymentLinkRawRow = Omit<PaymentLinkRow, "plan_kind"> & { plans: { kind: "RECURRING" | "IMPLEMENTATION" } | null };
+
 async function resolvePaymentLink(asaasPaymentLinkId: string | null | undefined): Promise<PaymentLinkRow | null> {
   if (!asaasPaymentLinkId) return null;
-  return findOne<PaymentLinkRow>(
-    `/rest/v1/payment_links?select=id,actor_id,plan_id,custom_plan_id,display_name,billing_period,value&asaas_payment_link_id=eq.${encodeURIComponent(asaasPaymentLinkId)}`,
+  const row = await findOne<PaymentLinkRawRow>(
+    `/rest/v1/payment_links?select=id,actor_id,plan_id,custom_plan_id,display_name,billing_period,value,plans(kind)&asaas_payment_link_id=eq.${encodeURIComponent(asaasPaymentLinkId)}`,
   );
+  if (!row) return null;
+  const { plans, ...rest } = row;
+  return { ...rest, plan_kind: plans?.kind ?? null };
 }
 
 async function resolveCustomer(payment: AsaasPayment, link: PaymentLinkRow): Promise<CustomerRow | null> {
@@ -111,7 +126,11 @@ async function resolveSubscription(payment: AsaasPayment, link: PaymentLinkRow, 
       plan_name_raw: link.display_name,
       payment_link_id: link.id,
       actor_id: link.actor_id,
-      billing_period: link.billing_period,
+      // Only IMPLEMENTATION-kind links carry billing_period "ONE_TIME", and
+      // those are routed to `implementation_payments` before reaching this
+      // function (see `syncAsaasPayment`) — so this is always MONTHLY/ANNUAL
+      // here, matching `subscriptions.billing_period`'s check constraint.
+      billing_period: link.billing_period as "MONTHLY" | "ANNUAL",
       // Use the link's face value, not this specific payment's value: for an
       // ANNUAL plan paid in N>1 installments, Asaas splits the total into N
       // equal payments, so payment.value here would only be 1/N of the real
@@ -127,6 +146,38 @@ async function resolveSubscription(payment: AsaasPayment, link: PaymentLinkRow, 
     },
   });
   return created;
+}
+
+/**
+ * Idempotently reflects a payment against an IMPLEMENTATION-kind plan/link
+ * (one-time setup fee — API Oficial da Meta, integração Claude/IA, etc.)
+ * into `implementation_payments`. Deliberately does NOT touch
+ * subscriptions/payments: an implantação never represents or feeds MRR.
+ */
+async function upsertImplementationPayment(payment: AsaasPayment, link: PaymentLinkRow, customer: CustomerRow) {
+  const body = {
+    customer_id: customer.id,
+    actor_id: link.actor_id,
+    payment_link_id: link.id,
+    plan_id: link.plan_id,
+    asaas_payment_id: payment.id,
+    description: link.display_name,
+    status: payment.status,
+    value: payment.value,
+    net_value: payment.netValue ?? null,
+    billing_type: payment.billingType ?? null,
+    due_date: payment.dueDate ?? null,
+    payment_date: payment.paymentDate ?? payment.clientPaymentDate ?? null,
+    confirmed_date: payment.confirmedDate ?? null,
+    raw_payload: payment,
+  };
+  const existing = await findOne<{ id: string }>(`/rest/v1/implementation_payments?select=id&asaas_payment_id=eq.${encodeURIComponent(payment.id)}`);
+  if (existing) {
+    await supabaseRequest(`/rest/v1/implementation_payments?id=eq.${existing.id}`, { method: "PATCH", body });
+    return "updated" as const;
+  }
+  await supabaseRequest("/rest/v1/implementation_payments", { method: "POST", body });
+  return "created" as const;
 }
 
 async function upsertPaymentRow(payment: AsaasPayment, link: PaymentLinkRow, customer: CustomerRow, subscription: SubscriptionRow) {
@@ -172,6 +223,14 @@ export async function syncAsaasPayment(payment: AsaasPayment) {
 
   const customer = await resolveCustomer(payment, link);
   if (!customer) return { result: "skipped" as const, reason: "E-mail do pagador não encontrado na aba ⭐ Base de Clientes; inclua-o lá para permitir a criação automática do cliente." };
+
+  // Implantação (taxa única — API Oficial da Meta, Claude/IA, etc.): tem
+  // seu próprio ledger e nunca cria assinatura/MRR.
+  if (link.plan_kind === "IMPLEMENTATION") {
+    const result = await upsertImplementationPayment(payment, link, customer);
+    return { result, customerId: customer.id, subscriptionId: null, linkId: link.id, implementation: true as const };
+  }
+
   const subscription = await resolveSubscription(payment, link, customer);
   const result = await upsertPaymentRow(payment, link, customer, subscription);
   return { result, customerId: customer.id, subscriptionId: subscription.id, linkId: link.id };

@@ -52,11 +52,15 @@ export type Plan = {
   id: string;
   code: string;
   name: string;
-  billing_period: "MONTHLY" | "ANNUAL";
+  billing_period: "MONTHLY" | "ANNUAL" | "ONE_TIME";
   standard_value: number;
   annual_installment_limit: number | null;
   status: "ACTIVE" | "INACTIVE";
+  /** RECURRING = plano de assinatura (entra no MRR). IMPLEMENTATION = taxa única de implantação (API Oficial, Claude/IA, etc.) — pagamentos vão para `implementation_payments`, nunca criam assinatura. */
+  kind: "RECURRING" | "IMPLEMENTATION";
 };
+
+export const planKindLabels: Record<Plan["kind"], string> = { RECURRING: "Plano recorrente", IMPLEMENTATION: "Implantação" };
 
 export type PriceVersion = {
   id: string;
@@ -81,7 +85,7 @@ export type PaymentLink = {
   url: string | null;
   display_name: string;
   value: number;
-  billing_period: "MONTHLY" | "ANNUAL";
+  billing_period: "MONTHLY" | "ANNUAL" | "ONE_TIME";
   max_installments: number | null;
   status: "ACTIVE" | "INACTIVE" | "PENDING";
   /** 'ASAAS_API' = created here via "Gerar link"; 'ASAAS_SYNC' = imported from the Asaas account, created outside this app. */
@@ -179,6 +183,35 @@ export type Payment = {
 export const PAID_PAYMENT_STATUSES = new Set(["RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH"]);
 export function isPaidStatus(status: string) {
   return PAID_PAYMENT_STATUSES.has(status);
+}
+
+/**
+ * A payment made against an IMPLEMENTATION-kind plan/link (one-time setup
+ * fee — API Oficial da Meta, integração Claude/IA, etc.). Kept fully
+ * separate from `Payment`/`Subscription`: it never represents or feeds
+ * MRR, it's just "cliente X pagou a implantação Y em tal data".
+ */
+export type ImplementationPayment = {
+  id: string;
+  customer_id: string | null;
+  actor_id: string | null;
+  payment_link_id: string | null;
+  plan_id: string | null;
+  asaas_payment_id: string;
+  description: string;
+  status: string;
+  value: number;
+  net_value: number | null;
+  billing_type: string | null;
+  due_date: string | null;
+  payment_date: string | null;
+  confirmed_date: string | null;
+  created_at: string;
+};
+
+/** Real cash collected from implantação fees in a period — same "paid statuses" rule as `sumRealizedRevenue`. */
+export function sumImplementationRevenue(payments: ImplementationPayment[]) {
+  return payments.filter((payment) => isPaidStatus(payment.status)).reduce((sum, payment) => sum + Number(payment.value), 0);
 }
 
 export type ActorMetrics = { clients: number; mrr: number; links: number };

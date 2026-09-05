@@ -29,8 +29,12 @@ const sections = [
 
 export default function Home() {
   const [sectionId, setSectionId] = useState<(typeof sections)[number]["id"]>("dashboard");
-  const { actors, metrics, totals, plans, customers, subscriptions, payments, events, links, connectLeads, error, reload } = useDashboardData();
+  const { actors, metrics, totals, plans, customers, subscriptions, payments, implementationPayments, events, links, connectLeads, error, reload } = useDashboardData();
   const active = sections.find((item) => item.id === sectionId) ?? sections[0];
+  // Implantação (taxa única) não entra na tabela de preços por ator nem na
+  // geração de links de assinatura — só o catálogo "Planos e Links" precisa
+  // ver esse tipo de produto.
+  const recurringPlans = plans.filter((plan) => plan.kind === "RECURRING");
 
   return (
     <div className="min-h-screen bg-[#f5f7fb] text-slate-950">
@@ -76,10 +80,10 @@ export default function Home() {
             </div>
           )}
           {sectionId === "form" && <section className="rounded-2xl border bg-white p-6"><h2 className="text-lg font-semibold">Formulário de inscrição</h2><p className="mt-2 text-sm text-slate-500">Compartilhe o formulário com candidatos a parceiros, embaixadores e instituições.</p><div className="mt-4 flex flex-wrap gap-4"><a className="font-medium text-blue-700 underline" href="/connect/inscricao" target="_blank" rel="noopener noreferrer">Abrir página do formulário</a><a className="font-medium text-blue-700 underline" href="https://tally.so/r/2EWBOV" target="_blank" rel="noopener noreferrer">Link público para compartilhar</a></div></section>}
-          {sectionId === "dashboard" && <OverviewSection actors={actors} customers={customers} subscriptions={subscriptions} payments={payments} events={events} />}
-          {sectionId === "clients" && <ClientsSection customers={customers} subscriptions={subscriptions} payments={payments} actors={actors} links={links} events={events} onChanged={reload} />}
-          {sectionId === "connect" && <ConnectSection actors={actors} metrics={metrics} plans={plans} leads={connectLeads} onChanged={reload} />}
-          {sectionId === "commercial" && <CommercialSection actors={actors} metrics={metrics} plans={plans} onChanged={reload} />}
+          {sectionId === "dashboard" && <OverviewSection actors={actors} customers={customers} subscriptions={subscriptions} payments={payments} implementationPayments={implementationPayments} events={events} />}
+          {sectionId === "clients" && <ClientsSection customers={customers} subscriptions={subscriptions} payments={payments} implementationPayments={implementationPayments} actors={actors} links={links} events={events} onChanged={reload} />}
+          {sectionId === "connect" && <ConnectSection actors={actors} metrics={metrics} plans={recurringPlans} leads={connectLeads} onChanged={reload} />}
+          {sectionId === "commercial" && <CommercialSection actors={actors} metrics={metrics} plans={recurringPlans} onChanged={reload} />}
           {sectionId === "payouts" && <PayoutsSection actors={actors} subscriptions={subscriptions} payments={payments} customers={customers} />}
           {sectionId === "revenue" && <RevenueSection subscriptions={subscriptions} payments={payments} plans={plans} totals={totals} />}
           {sectionId === "renewals" && <RenewalsSection links={links} actors={actors} />}

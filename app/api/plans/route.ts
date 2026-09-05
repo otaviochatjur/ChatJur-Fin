@@ -23,9 +23,10 @@ export async function GET(request: Request) {
 type PlanPayload = {
   code?: string;
   name?: string;
-  billingPeriod?: "MONTHLY" | "ANNUAL";
+  billingPeriod?: "MONTHLY" | "ANNUAL" | "ONE_TIME";
   standardValue?: number;
   annualInstallmentLimit?: number | null;
+  kind?: "RECURRING" | "IMPLEMENTATION";
 };
 
 /** Manually registers a plan in the catalog, to then attach payment links to it. */
@@ -34,7 +35,12 @@ export async function POST(request: Request) {
     const payload = (await request.json()) as PlanPayload;
     if (!payload.code?.trim()) return Response.json({ error: "Informe o código do plano." }, { status: 400 });
     if (!payload.name?.trim()) return Response.json({ error: "Informe o nome do plano." }, { status: 400 });
-    if (payload.billingPeriod !== "MONTHLY" && payload.billingPeriod !== "ANNUAL") return Response.json({ error: "Periodicidade inválida." }, { status: 400 });
+    const kind = payload.kind === "IMPLEMENTATION" ? "IMPLEMENTATION" : "RECURRING";
+    // Implantação é sempre taxa única — ignora o que veio no billingPeriod
+    // e força ONE_TIME, para nunca acabar com um produto de implantação
+    // marcado como recorrente por engano.
+    const billingPeriod = kind === "IMPLEMENTATION" ? "ONE_TIME" : payload.billingPeriod;
+    if (billingPeriod !== "MONTHLY" && billingPeriod !== "ANNUAL" && billingPeriod !== "ONE_TIME") return Response.json({ error: "Periodicidade inválida." }, { status: 400 });
     const standardValue = Number(payload.standardValue);
     if (!Number.isFinite(standardValue) || standardValue <= 0) return Response.json({ error: "Informe um valor padrão válido." }, { status: 400 });
     const annualInstallmentLimit = payload.annualInstallmentLimit != null ? Math.min(12, Math.max(1, Math.round(Number(payload.annualInstallmentLimit)))) : null;
@@ -45,7 +51,8 @@ export async function POST(request: Request) {
       body: {
         code: payload.code.trim().toUpperCase(),
         name: payload.name.trim(),
-        billing_period: payload.billingPeriod,
+        billing_period: billingPeriod,
+        kind,
         standard_value: standardValue,
         annual_installment_limit: annualInstallmentLimit,
         status: "ACTIVE",
@@ -72,8 +79,14 @@ export async function PATCH(request: Request) {
       if (!payload.code.trim()) return Response.json({ error: "Código não pode ficar em branco." }, { status: 400 });
       body.code = payload.code.trim().toUpperCase();
     }
-    if (payload.billingPeriod !== undefined) {
-      if (payload.billingPeriod !== "MONTHLY" && payload.billingPeriod !== "ANNUAL") return Response.json({ error: "Periodicidade inválida." }, { status: 400 });
+    if (payload.kind !== undefined) {
+      if (payload.kind !== "RECURRING" && payload.kind !== "IMPLEMENTATION") return Response.json({ error: "Tipo inválido." }, { status: 400 });
+      body.kind = payload.kind;
+      // Mantém a regra "implantação é sempre taxa única" mesmo em edições.
+      if (payload.kind === "IMPLEMENTATION") body.billing_period = "ONE_TIME";
+    }
+    if (payload.billingPeriod !== undefined && body.billing_period === undefined) {
+      if (payload.billingPeriod !== "MONTHLY" && payload.billingPeriod !== "ANNUAL" && payload.billingPeriod !== "ONE_TIME") return Response.json({ error: "Periodicidade inválida." }, { status: 400 });
       body.billing_period = payload.billingPeriod;
     }
     if (payload.standardValue !== undefined) {

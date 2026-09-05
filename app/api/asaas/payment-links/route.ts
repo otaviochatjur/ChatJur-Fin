@@ -103,7 +103,17 @@ export async function PATCH(request: Request) {
 
     const body: Record<string, unknown> = {};
     if (payload.actorId !== undefined) body.actor_id = payload.actorId || null;
-    if (payload.planId !== undefined) body.plan_id = payload.planId || null;
+    if (payload.planId !== undefined) {
+      body.plan_id = payload.planId || null;
+      // Vinculando a um plano de Implantação: o link passa a representar uma
+      // taxa única, não mais um plano recorrente — cascateia billing_period
+      // para ONE_TIME, o mesmo sinal que lib/payment-sync.ts usa para rotear
+      // o pagamento para implementation_payments em vez de subscriptions.
+      if (payload.planId) {
+        const [plan] = await supabaseRequest<{ kind: string }[]>(`/rest/v1/plans?id=eq.${encodeURIComponent(payload.planId)}&select=kind`);
+        if (plan?.kind === "IMPLEMENTATION") body.billing_period = "ONE_TIME";
+      }
+    }
 
     const nextActorId = payload.actorId !== undefined ? payload.actorId : current.actor_id;
     const nextPlanId = payload.planId !== undefined ? payload.planId : current.plan_id;

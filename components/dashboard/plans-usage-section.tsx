@@ -8,10 +8,13 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge } from "@/components/dashboard/status-badge";
-import { money, type CommercialActor, type PaymentLink, type Plan } from "@/lib/metrics";
+import { money, planKindLabels, type CommercialActor, type PaymentLink, type Plan } from "@/lib/metrics";
 
 const linkFilters = ["ALL", "PENDING", "ACTIVE", "INACTIVE"] as const;
 const linkFilterLabels: Record<(typeof linkFilters)[number], string> = { ALL: "Todos", PENDING: "Pendentes", ACTIVE: "Vinculados", INACTIVE: "Inativos" };
+
+const planKindFilters = ["ALL", "RECURRING", "IMPLEMENTATION"] as const;
+const planKindFilterLabels: Record<(typeof planKindFilters)[number], string> = { ALL: "Todos", RECURRING: "Planos recorrentes", IMPLEMENTATION: "Implantações" };
 
 export function PlansUsageSection({ links, actors, onChanged }: { links: PaymentLink[]; actors: CommercialActor[]; onChanged: () => void }) {
   return (
@@ -27,7 +30,8 @@ function PlansPanel({ links }: { links: PaymentLink[] }) {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState({ code: "", name: "", billingPeriod: "MONTHLY" as "MONTHLY" | "ANNUAL", standardValue: "", annualInstallmentLimit: "6" });
+  const [form, setForm] = useState({ code: "", name: "", kind: "RECURRING" as "RECURRING" | "IMPLEMENTATION", billingPeriod: "MONTHLY" as "MONTHLY" | "ANNUAL", standardValue: "", annualInstallmentLimit: "6" });
+  const [kindFilter, setKindFilter] = useState<(typeof planKindFilters)[number]>("ALL");
 
   async function loadPlans() {
     // No setState before this first await: keeps this effect-safe per
@@ -54,8 +58,10 @@ function PlansPanel({ links }: { links: PaymentLink[] }) {
   }, [links]);
 
   function resetForm() {
-    setForm({ code: "", name: "", billingPeriod: "MONTHLY", standardValue: "", annualInstallmentLimit: "6" });
+    setForm({ code: "", name: "", kind: "RECURRING", billingPeriod: "MONTHLY", standardValue: "", annualInstallmentLimit: "6" });
   }
+
+  const showInstallments = form.kind === "IMPLEMENTATION" || form.billingPeriod === "ANNUAL";
 
   async function createPlan() {
     setCreating(true);
@@ -63,7 +69,7 @@ function PlansPanel({ links }: { links: PaymentLink[] }) {
       const response = await fetch("/api/plans", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: form.code, name: form.name, billingPeriod: form.billingPeriod, standardValue: Number(form.standardValue), annualInstallmentLimit: form.billingPeriod === "ANNUAL" ? Number(form.annualInstallmentLimit) : null }),
+        body: JSON.stringify({ code: form.code, name: form.name, kind: form.kind, billingPeriod: form.billingPeriod, standardValue: Number(form.standardValue), annualInstallmentLimit: showInstallments ? Number(form.annualInstallmentLimit) : null }),
       });
       const data = await response.json();
       if (!response.ok) { toast.error(data.error ?? "Não foi possível criar o plano."); return; }
@@ -90,7 +96,7 @@ function PlansPanel({ links }: { links: PaymentLink[] }) {
     const response = await fetch("/api/plans", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: plan.id, name: patch.name, standardValue: Number(patch.standardValue), annualInstallmentLimit: plan.billing_period === "ANNUAL" ? Number(patch.annualInstallmentLimit) : null }),
+      body: JSON.stringify({ id: plan.id, name: patch.name, standardValue: Number(patch.standardValue), annualInstallmentLimit: plan.billing_period === "ANNUAL" || plan.kind === "IMPLEMENTATION" ? Number(patch.annualInstallmentLimit) : null }),
     });
     const data = await response.json();
     if (!response.ok) { toast.error(data.error ?? "Não foi possível salvar."); return; }
@@ -108,24 +114,40 @@ function PlansPanel({ links }: { links: PaymentLink[] }) {
       <div className="flex flex-wrap items-end gap-2 border-b border-slate-100 p-4">
         <Input className="w-28" placeholder="Código" value={form.code} onChange={(event) => setForm((current) => ({ ...current, code: event.target.value }))} />
         <Input className="flex-1 min-w-[180px]" placeholder="Nome do plano" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} />
-        <Select value={form.billingPeriod} onValueChange={(value) => setForm((current) => ({ ...current, billingPeriod: value as "MONTHLY" | "ANNUAL" }))}>
-          <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
+        <Select value={form.kind} onValueChange={(value) => setForm((current) => ({ ...current, kind: value as "RECURRING" | "IMPLEMENTATION" }))}>
+          <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="MONTHLY">Mensal</SelectItem>
-            <SelectItem value="ANNUAL">Anual</SelectItem>
+            <SelectItem value="RECURRING">Plano recorrente</SelectItem>
+            <SelectItem value="IMPLEMENTATION">Implantação (taxa única)</SelectItem>
           </SelectContent>
         </Select>
+        {form.kind === "RECURRING" && (
+          <Select value={form.billingPeriod} onValueChange={(value) => setForm((current) => ({ ...current, billingPeriod: value as "MONTHLY" | "ANNUAL" }))}>
+            <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="MONTHLY">Mensal</SelectItem>
+              <SelectItem value="ANNUAL">Anual</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
         <Input className="w-36" type="number" min="0.01" step="0.01" placeholder="Valor padrão" value={form.standardValue} onChange={(event) => setForm((current) => ({ ...current, standardValue: event.target.value }))} />
-        {form.billingPeriod === "ANNUAL" && <Input className="w-24" type="number" min="1" max="12" placeholder="Até Nx" value={form.annualInstallmentLimit} onChange={(event) => setForm((current) => ({ ...current, annualInstallmentLimit: event.target.value }))} />}
+        {showInstallments && <Input className="w-24" type="number" min="1" max="12" placeholder="Até Nx" value={form.annualInstallmentLimit} onChange={(event) => setForm((current) => ({ ...current, annualInstallmentLimit: event.target.value }))} />}
         <Button disabled={creating || !form.code.trim() || !form.name.trim() || !(Number(form.standardValue) > 0)} onClick={createPlan} className="bg-[#3a5d9d] text-white hover:bg-[#2c4a80]">{creating ? "Criando…" : "+ Novo plano"}</Button>
+      </div>
+      <div className="flex flex-wrap gap-2 border-b border-slate-100 p-4">
+        {planKindFilters.map((value) => (
+          <button key={value} onClick={() => setKindFilter(value)} className={`rounded-lg px-3 py-1.5 text-sm ${kindFilter === value ? "bg-[#eaf1fc] text-[#2c4a80]" : "text-slate-500 hover:bg-slate-50"}`}>
+            {planKindFilterLabels[value]}
+          </button>
+        ))}
       </div>
       <Table>
         <TableHeader>
-          <TableRow><TableHead>Plano</TableHead><TableHead>Periodicidade</TableHead><TableHead className="text-right">Preço padrão</TableHead><TableHead>Parcelamento</TableHead><TableHead className="text-right">Links ativos</TableHead><TableHead>Status</TableHead><TableHead /></TableRow>
+          <TableRow><TableHead>Plano</TableHead><TableHead>Tipo</TableHead><TableHead>Periodicidade</TableHead><TableHead className="text-right">Preço padrão</TableHead><TableHead>Parcelamento</TableHead><TableHead className="text-right">Links ativos</TableHead><TableHead>Status</TableHead><TableHead /></TableRow>
         </TableHeader>
         <TableBody>
-          {!loading && plans.length === 0 && <TableRow><TableCell colSpan={7} className="text-center text-sm text-slate-500">Nenhum plano cadastrado ainda.</TableCell></TableRow>}
-          {plans.map((plan) => (
+          {!loading && plans.length === 0 && <TableRow><TableCell colSpan={8} className="text-center text-sm text-slate-500">Nenhum plano cadastrado ainda.</TableCell></TableRow>}
+          {plans.filter((plan) => kindFilter === "ALL" || plan.kind === kindFilter).map((plan) => (
             <PlanRow
               key={plan.id}
               plan={plan}
@@ -155,14 +177,17 @@ function PlanRow({ plan, activeLinks, editing, onEdit, onCancelEdit, onSave, onT
   const [name, setName] = useState(plan.name);
   const [standardValue, setStandardValue] = useState(String(plan.standard_value));
   const [annualInstallmentLimit, setAnnualInstallmentLimit] = useState(String(plan.annual_installment_limit ?? 6));
+  const showInstallments = plan.billing_period === "ANNUAL" || plan.kind === "IMPLEMENTATION";
+  const billingPeriodLabel = plan.billing_period === "ANNUAL" ? "Anual" : plan.billing_period === "ONE_TIME" ? "Taxa única" : "Mensal";
 
   if (editing) {
     return (
       <TableRow>
         <TableCell><Input value={name} onChange={(event) => setName(event.target.value)} /></TableCell>
-        <TableCell><Badge variant="outline">{plan.billing_period === "ANNUAL" ? "Anual" : "Mensal"}</Badge></TableCell>
+        <TableCell><Badge variant="outline" className={plan.kind === "IMPLEMENTATION" ? "border-violet-200 bg-violet-50 text-violet-700" : undefined}>{planKindLabels[plan.kind]}</Badge></TableCell>
+        <TableCell><Badge variant="outline">{billingPeriodLabel}</Badge></TableCell>
         <TableCell className="text-right"><Input className="text-right" type="number" min="0.01" step="0.01" value={standardValue} onChange={(event) => setStandardValue(event.target.value)} /></TableCell>
-        <TableCell>{plan.billing_period === "ANNUAL" ? <Input type="number" min="1" max="12" value={annualInstallmentLimit} onChange={(event) => setAnnualInstallmentLimit(event.target.value)} /> : "—"}</TableCell>
+        <TableCell>{showInstallments ? <Input type="number" min="1" max="12" value={annualInstallmentLimit} onChange={(event) => setAnnualInstallmentLimit(event.target.value)} /> : "—"}</TableCell>
         <TableCell className="text-right">{activeLinks}</TableCell>
         <TableCell><StatusBadge status={plan.status} /></TableCell>
         <TableCell className="flex justify-end gap-1.5">
@@ -176,7 +201,8 @@ function PlanRow({ plan, activeLinks, editing, onEdit, onCancelEdit, onSave, onT
   return (
     <TableRow>
       <TableCell className="font-medium">{plan.name} <span className="text-xs text-slate-400">· {plan.code}</span></TableCell>
-      <TableCell><Badge variant="outline">{plan.billing_period === "ANNUAL" ? "Anual" : "Mensal"}</Badge></TableCell>
+      <TableCell><Badge variant="outline" className={plan.kind === "IMPLEMENTATION" ? "border-violet-200 bg-violet-50 text-violet-700" : undefined}>{planKindLabels[plan.kind]}</Badge></TableCell>
+      <TableCell><Badge variant="outline">{billingPeriodLabel}</Badge></TableCell>
       <TableCell className="text-right">{money.format(plan.standard_value)}</TableCell>
       <TableCell>{plan.annual_installment_limit ? `até ${plan.annual_installment_limit}x` : "—"}</TableCell>
       <TableCell className="text-right">{activeLinks}</TableCell>
@@ -192,13 +218,18 @@ function PlanRow({ plan, activeLinks, editing, onEdit, onCancelEdit, onSave, onT
 function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors: CommercialActor[]; onChanged: () => void }) {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [filter, setFilter] = useState<(typeof linkFilters)[number]>("PENDING");
+  const [search, setSearch] = useState("");
   const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     fetch("/api/plans?status=all").then((response) => response.json()).then((data) => setPlans(data.plans ?? [])).catch(() => setPlans([]));
   }, [links]);
 
-  const filtered = filter === "ALL" ? links : links.filter((link) => link.status === filter);
+  const planById = new Map(plans.map((plan) => [plan.id, plan]));
+  const term = search.trim().toLowerCase();
+  const filtered = links
+    .filter((link) => filter === "ALL" || link.status === filter)
+    .filter((link) => !term || link.display_name.toLowerCase().includes(term));
   const pendingCount = links.filter((link) => link.status === "PENDING").length;
 
   async function syncFromAsaas() {
@@ -234,12 +265,13 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
         </div>
         <Button variant="outline" size="sm" disabled={syncing} onClick={syncFromAsaas}>{syncing ? "Sincronizando…" : "Sincronizar links do Asaas"}</Button>
       </div>
-      <div className="flex flex-wrap gap-2 border-b border-slate-100 p-4">
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 p-4">
         {linkFilters.map((value) => (
           <button key={value} onClick={() => setFilter(value)} className={`rounded-lg px-3 py-1.5 text-sm ${filter === value ? "bg-[#eaf1fc] text-[#2c4a80]" : "text-slate-500 hover:bg-slate-50"}`}>
             {linkFilterLabels[value]}{value === "PENDING" && pendingCount > 0 ? ` (${pendingCount})` : ""}
           </button>
         ))}
+        <Input className="ml-auto w-56" placeholder="Buscar pelo nome do link" value={search} onChange={(event) => setSearch(event.target.value)} />
       </div>
       <Table>
         <TableHeader>
@@ -247,9 +279,14 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
         </TableHeader>
         <TableBody>
           {filtered.length === 0 && <TableRow><TableCell colSpan={6} className="text-center text-sm text-slate-500">Nenhum link nesse filtro.</TableCell></TableRow>}
-          {filtered.map((link) => (
+          {filtered.map((link) => {
+            const boundPlan = link.plan_id ? planById.get(link.plan_id) : undefined;
+            return (
             <TableRow key={link.id}>
-              <TableCell className="max-w-[240px] truncate font-medium" title={link.display_name}>{link.display_name}</TableCell>
+              <TableCell className="max-w-[240px] truncate font-medium" title={link.display_name}>
+                {link.display_name}
+                {boundPlan?.kind === "IMPLEMENTATION" && <Badge variant="outline" className="ml-2 border-violet-200 bg-violet-50 text-[10px] text-violet-700">Implantação</Badge>}
+              </TableCell>
               <TableCell>
                 <Select value={link.actor_id ?? "none"} onValueChange={(value) => bind(link, { actorId: value === "none" ? null : value })}>
                   <SelectTrigger className="w-44"><SelectValue placeholder="Sem ator" /></SelectTrigger>
@@ -268,11 +305,12 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
                   </SelectContent>
                 </Select>
               </TableCell>
-              <TableCell className="text-right text-sm">{money.format(link.value)}<span className="ml-1 text-xs text-slate-400">{link.billing_period === "ANNUAL" ? "/ano" : "/mês"}</span></TableCell>
+              <TableCell className="text-right text-sm">{money.format(link.value)}<span className="ml-1 text-xs text-slate-400">{link.billing_period === "ANNUAL" ? "/ano" : link.billing_period === "ONE_TIME" ? " · taxa única" : "/mês"}</span></TableCell>
               <TableCell className="text-xs text-slate-500">{link.source === "ASAAS_SYNC" ? "Importado do Asaas" : "Gerado aqui"}</TableCell>
               <TableCell><StatusBadge status={link.status} /></TableCell>
             </TableRow>
-          ))}
+            );
+          })}
         </TableBody>
       </Table>
     </section>

@@ -3,9 +3,9 @@
 import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { localDate, summarizeActivities, type CustomerActivity } from "@/lib/customer-activity";
-import { isPaidStatus, money, monthlyValue, type Customer, type CommercialActor, type Subscription, type Payment } from "@/lib/metrics";
+import { isPaidStatus, money, monthlyValue, type Customer, type CommercialActor, type ImplementationPayment, type Subscription, type Payment } from "@/lib/metrics";
 
-export function OverviewSection({ actors, customers, subscriptions, payments, events }: { actors: CommercialActor[]; customers: Customer[]; subscriptions: Subscription[]; payments: Payment[]; events: CustomerActivity[] }) {
+export function OverviewSection({ actors, customers, subscriptions, payments, implementationPayments, events }: { actors: CommercialActor[]; customers: Customer[]; subscriptions: Subscription[]; payments: Payment[]; implementationPayments: ImplementationPayment[]; events: CustomerActivity[] }) {
   const [start, setStart] = useState(() => localDate().slice(0, 7) + "-01");
   const [end, setEnd] = useState(localDate);
   const [customerId, setCustomerId] = useState("all");
@@ -19,6 +19,7 @@ export function OverviewSection({ actors, customers, subscriptions, payments, ev
   const summary = summarizeActivities(filteredEvents);
   const active = subscriptions.filter(subscription => ids.has(subscription.customer_id) && subscription.status === "ACTIVE");
   const paid = payments.filter(payment => ids.has(payment.customer_id ?? "") && isPaidStatus(payment.status) && inPeriod(payment.payment_date));
+  const paidImplementations = implementationPayments.filter(payment => ids.has(payment.customer_id ?? "") && isPaidStatus(payment.status) && inPeriod(payment.payment_date));
   const cards = [
     ["Upsells no período", String(summary.upsells)], ["Valor adicional contratado", money.format(summary.upsellValue)],
     ["Renovações no período", String(summary.renewals)], ["Valor das renovações", money.format(summary.renewalValue)],
@@ -28,6 +29,8 @@ export function OverviewSection({ actors, customers, subscriptions, payments, ev
     ["Impacto das mudanças no MRR", money.format(summary.planMrrDelta)], ["Cancelamentos registrados", String(summary.cancellations)],
     ["Novos clientes no período", String(scoped.filter(customer => inPeriod(customer.signed_at)).length)],
     ["Recebido no período", money.format(paid.reduce((sum, payment) => sum + Number(payment.value), 0))],
+    ["Implantações pagas no período", String(paidImplementations.length)],
+    ["Valor de implantações recebido", money.format(paidImplementations.reduce((sum, payment) => sum + Number(payment.value), 0))],
   ];
   const selectClass = "mt-1 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm";
   return <div className="space-y-5">
