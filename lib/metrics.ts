@@ -152,7 +152,7 @@ export type Subscription = {
   asaas_installment_id: string | null;
   started_at: string | null;
   cancelled_at: string | null;
-  source: "SYSTEM" | "LEGACY_IMPORT";
+  source: "SYSTEM" | "LEGACY_IMPORT" | "MANUAL";
   created_at: string;
 };
 

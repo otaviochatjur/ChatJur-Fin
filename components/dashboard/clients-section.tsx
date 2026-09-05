@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { isPaidStatus, money, monthlyValue, roleLabels, type CommercialActor, type Customer, type Payment, type PaymentLink, type Subscription } from "@/lib/metrics";
+import { localDate } from "@/lib/customer-activity";
 
 const statusLabels: Record<Customer["status"], string> = { ACTIVE: "Ativo", CANCELLED: "Cancelado", FROZEN: "Congelado" };
 const statusBadgeClass: Record<Customer["status"], string> = {
@@ -181,6 +182,7 @@ function ClientDetail({ customer, subscriptions, payments, actors, links, events
   const [comments, setComments] = useState(customer.comments ?? "");
   const [acquisitionActorId, setAcquisitionActorId] = useState<string>(customer.acquisition_actor_id ?? "none");
   const [saving, setSaving] = useState(false);
+  const [addingPlan, setAddingPlan] = useState(false);
 
   async function save() {
     setSaving(true);
@@ -217,19 +219,23 @@ function ClientDetail({ customer, subscriptions, payments, actors, links, events
 
       <CustomerTimeline subscriptions={subscriptions} customerId={customer.id} events={events} onChanged={onChanged} />
       <div className="space-y-2 rounded-xl border border-slate-200 p-3">
-        <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">Assinaturas</p>
-        {subscriptions.length === 0 && <p className="text-sm text-slate-500">Nenhuma assinatura registrada.</p>}
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">Assinaturas</p>
+          <Button variant="outline" size="sm" onClick={() => setAddingPlan((current) => !current)}>{addingPlan ? "Cancelar" : "+ Cadastrar plano"}</Button>
+        </div>
+        {subscriptions.length === 0 && !addingPlan && <p className="text-sm text-slate-500">Nenhuma assinatura registrada. Se este cliente é cobrado fora do Asaas (ex: veio da planilha e ainda não pagou por link), cadastre o plano manualmente para que ele entre no MRR.</p>}
+        {addingPlan && <ManualSubscriptionForm customerId={customer.id} onDone={() => { setAddingPlan(false); onChanged(); }} onCancel={() => setAddingPlan(false)} />}
         {subscriptions.map((subscription) => (
           <div key={subscription.id} className="rounded-lg border border-slate-100 p-2.5 text-sm">
             <div className="flex items-center justify-between gap-2">
               <span className="font-medium">{subscription.plan_name_raw ?? "Plano"}</span>
               <Badge variant="outline" className={statusBadgeClass[subscription.status]}>{statusLabels[subscription.status]}</Badge>
             </div>
-            <p className="text-xs text-slate-500">{subscription.billing_period === "ANNUAL" ? "Anual" : "Mensal"} · {money.format(subscription.value)}{subscription.source === "LEGACY_IMPORT" ? " · importado" : ""}</p>
+            <p className="text-xs text-slate-500">{subscription.billing_period === "ANNUAL" ? "Anual" : "Mensal"} · {money.format(subscription.value)}{subscription.source === "LEGACY_IMPORT" ? " · importado" : subscription.source === "MANUAL" ? " · cadastrado manualmente" : ""}</p>
             {linkLabel(subscription.payment_link_id) ? (
               <p className="mt-1 text-xs font-medium text-[#3b82f6]">Pago via link: {linkLabel(subscription.payment_link_id)}</p>
             ) : (
-              <p className="mt-1 text-xs text-slate-400">Sem link de pagamento rastreado (venda direta/legado)</p>
+              <p className="mt-1 text-xs text-slate-400">{subscription.source === "MANUAL" ? "Sem link de pagamento (cadastro manual)" : "Sem link de pagamento rastreado (venda direta/legado)"}</p>
             )}
           </div>
         ))}
@@ -274,6 +280,58 @@ function ClientDetail({ customer, subscriptions, payments, actors, links, events
         )}
         <Textarea placeholder="Comentários internos (CS)" value={comments} onChange={(event) => setComments(event.target.value)} />
         <Button className="w-full bg-[#3a5d9d] text-white hover:bg-[#2c4a80]" disabled={saving} onClick={save}>{saving ? "Salvando…" : "Salvar alterações"}</Button>
+      </div>
+    </div>
+  );
+}
+
+function ManualSubscriptionForm({ customerId, onDone, onCancel }: { customerId: string; onDone: () => void; onCancel: () => void }) {
+  const [planName, setPlanName] = useState("");
+  const [billingPeriod, setBillingPeriod] = useState<"MONTHLY" | "ANNUAL">("MONTHLY");
+  const [value, setValue] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("");
+  const [startedAt, setStartedAt] = useState(localDate);
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    if (saving) return;
+    setSaving(true);
+    try {
+      const response = await fetch("/api/subscriptions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customerId, planName, billingPeriod, value: Number(value), paymentMethod: paymentMethod || null, startedAt }),
+      });
+      const data = await response.json();
+      if (!response.ok) { toast.error(data.error ?? "Não foi possível cadastrar o plano."); return; }
+      toast.success("Plano cadastrado. O MRR já considera esse valor.");
+      onDone();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2 rounded-lg border border-dashed border-[#3b82f6] bg-blue-50/30 p-3">
+      <p className="text-xs text-slate-500">Use isto para clientes cobrados fora do Asaas (ex: entrou pela planilha e ainda não tem link de pagamento). Isso não gera cobrança nenhuma, só registra o plano para as métricas.</p>
+      <Input placeholder="Nome do plano" value={planName} onChange={(event) => setPlanName(event.target.value)} />
+      <div className="grid grid-cols-2 gap-2">
+        <Select value={billingPeriod} onValueChange={(period) => setBillingPeriod(period as "MONTHLY" | "ANNUAL")}>
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="MONTHLY">Mensal</SelectItem>
+            <SelectItem value="ANNUAL">Anual</SelectItem>
+          </SelectContent>
+        </Select>
+        <Input type="number" min="0.01" step="0.01" placeholder={`Valor integral ${billingPeriod === "ANNUAL" ? "anual" : "mensal"} (R$)`} value={value} onChange={(event) => setValue(event.target.value)} />
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <Input placeholder="Forma de pagamento (opcional)" value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)} />
+        <Input type="date" value={startedAt} onChange={(event) => setStartedAt(event.target.value)} />
+      </div>
+      <div className="flex gap-2">
+        <Button size="sm" variant="ghost" onClick={onCancel}>Cancelar</Button>
+        <Button size="sm" className="flex-1 bg-[#3a5d9d] text-white hover:bg-[#2c4a80]" disabled={saving || !planName.trim() || !(Number(value) > 0)} onClick={save}>{saving ? "Salvando…" : "Salvar plano"}</Button>
       </div>
     </div>
   );
