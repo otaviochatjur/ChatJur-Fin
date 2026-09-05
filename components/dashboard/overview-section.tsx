@@ -1,72 +1,53 @@
-import { Activity, BadgeDollarSign, Handshake, Link2, Users } from "lucide-react";
-import { money, roleLabels, type AuditEvent, type CommercialActor } from "@/lib/metrics";
+"use client";
 
-const actionLabels: Record<string, string> = { CREATED: "criado(a)", UPDATED: "atualizado(a)" };
-const entityLabels: Record<string, string> = {
-  commercial_actor: "Cadastro comercial",
-  actor_price_version: "Versão de preço",
-  payment_link: "Link de pagamento",
-  customer_attribution: "Atribuição de cliente",
-};
+import { useState } from "react";
+import { Input } from "@/components/ui/input";
+import { localDate, summarizeActivities, type CustomerActivity } from "@/lib/customer-activity";
+import { isPaidStatus, money, monthlyValue, type Customer, type CommercialActor, type Subscription, type Payment } from "@/lib/metrics";
 
-export function OverviewSection({ actors, totals, auditEvents }: { actors: CommercialActor[]; totals: { activeLinks: number; mrr: number; clients: number }; auditEvents: AuditEvent[] }) {
-  const byRole = { PARTNER: 0, AMBASSADOR: 0, EXTERNAL_SALES: 0 } as Record<CommercialActor["role"], number>;
-  for (const actor of actors) byRole[actor.role] += 1;
-
+export function OverviewSection({ actors, customers, subscriptions, payments, events }: { actors: CommercialActor[]; customers: Customer[]; subscriptions: Subscription[]; payments: Payment[]; events: CustomerActivity[] }) {
+  const [start, setStart] = useState(() => localDate().slice(0, 7) + "-01");
+  const [end, setEnd] = useState(localDate);
+  const [customerId, setCustomerId] = useState("all");
+  const [actorId, setActorId] = useState("all");
+  const [status, setStatus] = useState("all");
+  const invalidPeriod = Boolean(start && end && start > end);
+  const inPeriod = (date: string | null) => !invalidPeriod && Boolean(date && (!start || date.slice(0, 10) >= start) && (!end || date.slice(0, 10) <= end));
+  const scoped = customers.filter(customer => (customerId === "all" || customer.id === customerId) && (actorId === "all" || customer.acquisition_actor_id === actorId) && (status === "all" || customer.status === status));
+  const ids = new Set(scoped.map(customer => customer.id));
+  const filteredEvents = events.filter(event => ids.has(event.customerId) && inPeriod(event.occurredOn));
+  const summary = summarizeActivities(filteredEvents);
+  const active = subscriptions.filter(subscription => ids.has(subscription.customer_id) && subscription.status === "ACTIVE");
+  const paid = payments.filter(payment => ids.has(payment.customer_id ?? "") && isPaidStatus(payment.status) && inPeriod(payment.payment_date));
   const cards = [
-    { label: "MRR total", value: money.format(totals.mrr), note: "Somado sobre links ativos", Icon: BadgeDollarSign },
-    { label: "Clientes atribuídos", value: String(totals.clients), note: "Distintos em customer_attributions", Icon: Users },
-    { label: "Links ativos", value: String(totals.activeLinks), note: "Contratos abertos no Asaas", Icon: Link2 },
-    { label: "Rede comercial", value: String(actors.length), note: `${byRole.PARTNER} parceiros · ${byRole.AMBASSADOR} embaixadores · ${byRole.EXTERNAL_SALES} comerciais`, Icon: Handshake },
+    ["Upsells no período", String(summary.upsells)], ["Valor adicional contratado", money.format(summary.upsellValue)],
+    ["Renovações no período", String(summary.renewals)], ["Valor das renovações", money.format(summary.renewalValue)],
+    ["Downsells no período", String(summary.downsells)], ["Redução por downsells", money.format(summary.downsellValue)],
+    ["Upgrades de plano", String(summary.upgrades)], ["Downgrades de plano", String(summary.downgrades)],
+    ["Mudanças de periodicidade", String(summary.periodChanges)], ["Anual → mensal", String(summary.annualToMonthly)], ["Mensal → anual", String(summary.monthlyToAnnual)],
+    ["Impacto das mudanças no MRR", money.format(summary.planMrrDelta)], ["Cancelamentos registrados", String(summary.cancellations)],
+    ["Novos clientes no período", String(scoped.filter(customer => inPeriod(customer.signed_at)).length)],
+    ["Recebido no período", money.format(paid.reduce((sum, payment) => sum + Number(payment.value), 0))],
   ];
-
-  return (
-    <div className="space-y-5">
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {cards.map(({ label, value, note, Icon }) => (
-          <article key={label} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.04)]">
-            <div className="flex items-center justify-between text-sm text-slate-500">
-              <span>{label}</span>
-              <span className="grid size-9 place-items-center rounded-xl bg-[#edf8f2] text-[#167354]"><Icon className="size-4" /></span>
-            </div>
-            <p className="mt-4 text-2xl font-semibold tracking-tight">{value}</p>
-            <p className="mt-1 text-xs text-slate-500">{note}</p>
-          </article>
-        ))}
-      </section>
-      <section className="rounded-2xl border border-slate-200 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.04)]">
-        <div className="flex items-center justify-between gap-3 border-b border-slate-100 p-5">
-          <div>
-            <h2 className="font-semibold">Atividade recente</h2>
-            <p className="mt-1 text-sm text-slate-500">Últimos eventos registrados na auditoria (Supabase)</p>
-          </div>
-          <Activity className="size-4 text-slate-400" />
-        </div>
-        <ul className="divide-y divide-slate-100">
-          {auditEvents.length === 0 && <li className="p-5 text-sm text-slate-500">Nenhum evento registrado ainda.</li>}
-          {auditEvents.map((event) => (
-            <li key={event.id} className="flex items-center justify-between gap-3 p-4 text-sm">
-              <div>
-                <p className="font-medium">{entityLabels[event.entity_type] ?? event.entity_type} {actionLabels[event.action] ?? event.action.toLowerCase()}</p>
-                <p className="text-xs text-slate-500">{event.actor_email ?? "Sistema"}</p>
-              </div>
-              <span className="text-xs text-slate-400">{new Date(event.created_at).toLocaleString("pt-BR")}</span>
-            </li>
-          ))}
-        </ul>
-      </section>
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.04)]">
-        <h2 className="font-semibold">Papéis mantidos separadamente</h2>
-        <p className="mt-1 text-sm text-slate-500">Cada papel comercial acumula clientes e MRR de forma independente, mesmo quando um mesmo cliente tem parceiro e comercial externo atribuídos.</p>
-        <div className="mt-4 grid gap-3 sm:grid-cols-3">
-          {(Object.entries(byRole) as [CommercialActor["role"], number][]).map(([role, count]) => (
-            <div key={role} className="rounded-xl bg-slate-50 p-4">
-              <p className="text-xs text-slate-500">{roleLabels[role]}</p>
-              <p className="mt-1 text-xl font-semibold">{count}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-    </div>
-  );
+  const selectClass = "mt-1 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm";
+  return <div className="space-y-5">
+    <section className="rounded-2xl border border-slate-200 bg-white p-5">
+      <h2 className="font-semibold">Métricas de clientes</h2>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <label className="text-sm">De<Input type="date" value={start} onChange={event => setStart(event.target.value)} /></label>
+        <label className="text-sm">Até<Input type="date" value={end} onChange={event => setEnd(event.target.value)} /></label>
+        <label className="text-sm">Cliente<select className={selectClass} value={customerId} onChange={event => setCustomerId(event.target.value)}><option value="all">Todos os clientes</option>{customers.map(customer => <option key={customer.id} value={customer.id}>{customer.office_name}</option>)}</select></label>
+        <label className="text-sm">Parceiro de origem<select className={selectClass} value={actorId} onChange={event => setActorId(event.target.value)}><option value="all">Todos os parceiros</option>{actors.map(actor => <option key={actor.id} value={actor.id}>{actor.name}</option>)}</select></label>
+        <label className="text-sm">Status atual<select className={selectClass} value={status} onChange={event => setStatus(event.target.value)}><option value="all">Todos os status</option><option value="ACTIVE">Ativo</option><option value="FROZEN">Congelado</option><option value="CANCELLED">Cancelado</option></select></label>
+      </div>
+      {invalidPeriod && <p role="alert" className="mt-3 text-sm text-red-700">A data inicial deve ser anterior ou igual à data final.</p>}
+      <p className="mt-3 text-sm text-slate-500">{scoped.length} cliente(s) selecionado(s). Os registros são contados pela data do acontecimento ou vigência. Mudanças simultâneas de plano e periodicidade entram nas duas contagens, com impacto único no MRR. Valores anuais são divididos por 12; não há cobrança proporcional.</p>
+    </section>
+    {!invalidPeriod && <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{cards.map(([label, value]) => <article key={label} className="rounded-2xl border border-slate-200 bg-white p-5"><p className="text-sm text-slate-500">{label}</p><p className="mt-3 text-2xl font-semibold text-[#24477e]">{value}</p></article>)}</section>}
+    <section className="rounded-2xl border border-slate-200 bg-white p-5">
+      <h2 className="font-semibold">Carteira atual</h2>
+      <p className="mt-1 text-sm text-slate-500">Posição atual dos clientes selecionados, independente do período acima.</p>
+      <div className="mt-4 grid gap-4 sm:grid-cols-2"><div><p className="text-sm text-slate-500">Clientes com assinatura ativa</p><p className="text-2xl font-semibold">{new Set(active.map(subscription => subscription.customer_id)).size}</p></div><div><p className="text-sm text-slate-500">MRR das assinaturas ativas</p><p className="text-2xl font-semibold">{money.format(active.reduce((sum, subscription) => sum + monthlyValue(subscription.value, subscription.billing_period), 0))}</p></div></div>
+    </section>
+  </div>;
 }

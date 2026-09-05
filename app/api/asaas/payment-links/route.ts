@@ -1,13 +1,46 @@
+import { isPaidStatus } from "@/lib/metrics";
 import { supabaseRequest } from "@/lib/supabase-server";
 
-type PaymentLinkRequest = { partnerId?: string; partnerName?: string; planId?: string; planName?: string; billingPeriod?: "MONTHLY" | "ANNUAL"; priceVersion?: string; priceVersionId?: string; value?: number };
+type PaymentLinkRequest = { partnerId?: string; partnerName?: string; planId?: string; customPlanId?: string; planName?: string; billingPeriod?: "MONTHLY" | "ANNUAL"; priceVersion?: string; priceVersionId?: string; value?: number; maxInstallments?: number };
+
+/**
+ * Real per-link performance: how many customers actually subscribed through
+ * it and how much they've actually paid — not the link's face value. A link
+ * can sit unused forever without inflating any number here.
+ */
+async function attachRealStats(links: Record<string, unknown>[]) {
+  const ids = links.map((link) => String(link.id));
+  if (ids.length === 0) return links;
+  const inFilter = `payment_link_id=in.(${ids.join(",")})`;
+  const [subscriptions, payments] = await Promise.all([
+    supabaseRequest<{ payment_link_id: string; status: string; customer_id: string }[]>(`/rest/v1/subscriptions?select=payment_link_id,status,customer_id&${inFilter}`),
+    supabaseRequest<{ payment_link_id: string; status: string; value: number }[]>(`/rest/v1/payments?select=payment_link_id,status,value&${inFilter}`),
+  ]);
+  const activeSubscribers = new Map<string, Set<string>>();
+  for (const sub of subscriptions) {
+    if (sub.status !== "ACTIVE") continue;
+    const set = activeSubscribers.get(sub.payment_link_id) ?? new Set<string>();
+    set.add(sub.customer_id);
+    activeSubscribers.set(sub.payment_link_id, set);
+  }
+  const totalReceived = new Map<string, number>();
+  for (const payment of payments) {
+    if (!isPaidStatus(payment.status)) continue;
+    totalReceived.set(payment.payment_link_id, (totalReceived.get(payment.payment_link_id) ?? 0) + Number(payment.value));
+  }
+  return links.map((link) => ({
+    ...link,
+    active_subscribers: activeSubscribers.get(String(link.id))?.size ?? 0,
+    total_received: totalReceived.get(String(link.id)) ?? 0,
+  }));
+}
 
 export async function GET(request: Request) {
   try {
     const actorId = new URL(request.url).searchParams.get("actorId");
     const filter = actorId ? `&actor_id=eq.${encodeURIComponent(actorId)}` : "";
-    const links = await supabaseRequest<unknown[]>(`/rest/v1/payment_links?select=*&order=created_at.desc${filter}`);
-    return Response.json({ links });
+    const links = await supabaseRequest<Record<string, unknown>[]>(`/rest/v1/payment_links?select=*&order=created_at.desc${filter}`);
+    return Response.json({ links: await attachRealStats(links) });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Erro ao consultar links." }, { status: 500 });
   }
@@ -24,13 +57,24 @@ export async function POST(request: Request) {
     if (!payload.partnerId || !payload.planName || !Number.isFinite(value) || value <= 0) return Response.json({ error: "Responsável, plano e valor válido são obrigatórios." }, { status: 400 });
 
     const annual = payload.billingPeriod === "ANNUAL";
-    const externalReference = ["CJ", "ACTOR", payload.partnerId, payload.planId ?? "PLAN", payload.priceVersion ?? "V1"].join("_").toUpperCase();
-    const asaasPayload = { name: `${payload.planName} — ${annual ? "Plano Anual" : "Plano Mensal"}`, description: `${annual ? "Licença anual" : "Assinatura mensal"} do Chat Jurídico — indicação ${payload.partnerName ?? payload.partnerId}`, value, billingType: "UNDEFINED", chargeType: annual ? "INSTALLMENT" : "RECURRENT", ...(annual ? { maxInstallmentCount: 6 } : { subscriptionCycle: "MONTHLY" }), dueDateLimitDays: 10, externalReference, notificationEnabled: true };
-    const response = await fetch(`${baseUrl}/paymentLinks`, { method: "POST", headers: { "Content-Type": "application/json", access_token: apiKey }, body: JSON.stringify(asaasPayload) });
+    const maxInstallments = annual ? Math.min(12, Math.max(1, Math.round(Number(payload.maxInstallments) || 6))) : null;
+    const externalReference = ["CJ", "ACTOR", payload.partnerId, payload.planId ?? payload.customPlanId ?? "PLAN", payload.priceVersion ?? "V1", Date.now().toString(36)].join("_").toUpperCase();
+    // Every generated link's name carries the referring partner/embaixador/comercial
+    // externo's full name, so it's identifiable at a glance in the Asaas dashboard
+    // and in our own "Links gerados" list.
+    const referrerName = (payload.partnerName ?? "").trim();
+    const linkName = `${payload.planName} — ${annual ? "Plano Anual" : "Plano Mensal"}${referrerName ? ` · ${referrerName}` : ""}`;
+    const asaasPayload = { name: linkName, description: `${annual ? "Licença anual" : "Assinatura mensal"} do Chat Jurídico — indicação ${payload.partnerName ?? payload.partnerId}`, value, billingType: "UNDEFINED", chargeType: annual ? "INSTALLMENT" : "RECURRENT", ...(annual ? { maxInstallmentCount: maxInstallments } : { subscriptionCycle: "MONTHLY" }), dueDateLimitDays: 10, externalReference, notificationEnabled: true };
+    const response = await fetch(`${baseUrl}/paymentLinks`, { method: "POST", headers: { "Content-Type": "application/json", "User-Agent": "ChatJuridicoFinanceiro/1.0", access_token: apiKey }, body: JSON.stringify(asaasPayload) });
     const data = await response.json();
-    if (!response.ok) return Response.json({ error: "O Asaas recusou a criação do link.", details: data }, { status: response.status });
+    if (!response.ok) {
+      const asaasReason = Array.isArray(data?.errors) && data.errors.length > 0
+        ? data.errors.map((item: { description?: string }) => item.description).filter(Boolean).join(" ")
+        : null;
+      return Response.json({ error: asaasReason ?? "O Asaas recusou a criação do link.", details: data }, { status: response.status });
+    }
 
-    const [record] = await supabaseRequest<Record<string, unknown>[]>("/rest/v1/payment_links", { method: "POST", prefer: "return=representation", body: { actor_id: payload.partnerId, plan_id: payload.planId || null, price_version_id: payload.priceVersionId || null, asaas_payment_link_id: data.id ?? null, external_reference: externalReference, url: data.url ?? null, display_name: asaasPayload.name, value, billing_period: annual ? "ANNUAL" : "MONTHLY", max_installments: annual ? 6 : null, status: "ACTIVE", source: "ASAAS_API" } });
+    const [record] = await supabaseRequest<Record<string, unknown>[]>("/rest/v1/payment_links", { method: "POST", prefer: "return=representation", body: { actor_id: payload.partnerId, plan_id: payload.planId || null, custom_plan_id: payload.customPlanId || null, price_version_id: payload.priceVersionId || null, asaas_payment_link_id: data.id ?? null, external_reference: externalReference, url: data.url ?? null, display_name: asaasPayload.name, value, billing_period: annual ? "ANNUAL" : "MONTHLY", max_installments: maxInstallments, status: "ACTIVE", source: "ASAAS_API" } });
     await supabaseRequest("/rest/v1/audit_events", { method: "POST", body: { entity_type: "payment_link", entity_id: String(record.id), action: "CREATED", after_json: record } });
     return Response.json({ paymentLink: data, record, externalReference }, { status: 201 });
   } catch (error) {

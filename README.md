@@ -27,7 +27,25 @@ Scripts that need writable project-scoped home, npm, XDG, and temporary paths us
 - `vite.config.ts` simulates declared bindings for local development
 - `lib/supabase-server.ts` performs authenticated REST calls to Supabase using the service role key
 - `supabase/migrations/` and `supabase/seed.sql` define the commercial/financial schema (partners, plans, price versions, payment links, audit trail)
-- `app/api/` exposes `commercial-actors`, `price-versions`, `plans`, and `asaas/payment-links` routes backed by Supabase and Asaas
+- `app/api/` exposes `commercial-actors`, `price-versions`, `plans`, `asaas/payment-links`, `customers`, `subscriptions`, `payments`, `asaas/sync-payments`, and `webhooks/asaas` routes backed by Supabase and Asaas
+
+## Real payment tracking (Asaas webhook)
+
+Revenue/MRR and the client CRM are driven by real Asaas payments, not by the
+face value of generated links. Once this app is deployed with a public URL:
+
+1. In the Asaas dashboard, go to **Configurações > Integrações > Webhooks**.
+2. Register a webhook pointing to `https://SEU-DOMINIO/api/webhooks/asaas`.
+3. Set the same value as `ASAAS_WEBHOOK_TOKEN` (see `.env.example`) as the
+   webhook's authentication token — Asaas sends it back in the
+   `asaas-access-token` header on every delivery, which the route validates.
+4. Select at least the payment events: `PAYMENT_RECEIVED`, `PAYMENT_CONFIRMED`,
+   `PAYMENT_OVERDUE`, `PAYMENT_REFUNDED`, `PAYMENT_DELETED`.
+
+Until the webhook is registered (or to backfill anything missed), use the
+"Sincronizar pagamentos" button in the Partners/Sellers/Clients sections,
+which calls `POST /api/asaas/sync-payments` and pulls payments directly from
+the Asaas API for each tracked link.
 
 ## Workspace Auth Headers
 
