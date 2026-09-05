@@ -1,4 +1,5 @@
 import { fetchAsaasCustomer, type AsaasCustomer, type AsaasPayment } from "@/lib/asaas";
+import { findClientInSheet } from "@/lib/clients-allowlist";
 import { supabaseRequest } from "@/lib/supabase-server";
 
 type PaymentLinkRow = { id: string; actor_id: string; plan_id: string | null; custom_plan_id: string | null; display_name: string; billing_period: "MONTHLY" | "ANNUAL"; value: number };
@@ -19,7 +20,7 @@ async function resolvePaymentLink(asaasPaymentLinkId: string | null | undefined)
   );
 }
 
-async function resolveCustomer(payment: AsaasPayment): Promise<CustomerRow | null> {
+async function resolveCustomer(payment: AsaasPayment, link: PaymentLinkRow): Promise<CustomerRow | null> {
   const existing = await findOne<CustomerRow>(
     `/rest/v1/customers?select=id,email,asaas_customer_id,acquisition_actor_id,status&asaas_customer_id=eq.${encodeURIComponent(payment.customer)}`,
   );
@@ -47,7 +48,35 @@ async function resolveCustomer(payment: AsaasPayment): Promise<CustomerRow | nul
     }
   }
 
-  return null;
+  // Nobody in our database matches this Asaas customer yet: this is a
+  // brand-new client. The "⭐ Base de Clientes" sheet (Nome, Email, Telefone,
+  // OfficeId) is the single manual intake point — we only auto-create a
+  // customer record here if it's listed there, or if the gate isn't
+  // configured at all (CLIENTS_SHEET_WEBHOOK_URL unset), in which case
+  // everything Asaas reports is trusted directly. Once created, this row is
+  // never touched by the sheet again: from here on Supabase is the source
+  // of truth and edits made in the app (plan changes, status, etc.) are
+  // final.
+  const gateEnabled = Boolean(process.env.CLIENTS_SHEET_WEBHOOK_URL);
+  const sheetRow = details.email ? await findClientInSheet(details.email) : null;
+  if (gateEnabled && !sheetRow) return null;
+
+  const [created] = await supabaseRequest<CustomerRow[]>("/rest/v1/customers", {
+    method: "POST",
+    prefer: "return=representation",
+    body: {
+      asaas_customer_id: payment.customer,
+      external_office_id: sheetRow?.officeId ?? null,
+      office_name: sheetRow?.officeName ?? details.name ?? "Sem nome",
+      responsible_name: sheetRow?.responsibleName ?? details.name ?? null,
+      email: details.email ?? null,
+      phone: sheetRow?.phone ?? details.mobilePhone ?? details.phone ?? null,
+      acquisition_actor_id: link.actor_id,
+      source_channel: "ASAAS_SYNC",
+      status: "ACTIVE",
+    },
+  });
+  return created ?? null;
 }
 
 async function resolveSubscription(payment: AsaasPayment, link: PaymentLinkRow, customer: CustomerRow): Promise<SubscriptionRow> {
@@ -141,8 +170,8 @@ export async function syncAsaasPayment(payment: AsaasPayment) {
   const link = await resolvePaymentLink(payment.paymentLink);
   if (!link) return { result: "skipped" as const, reason: `paymentLink ${payment.paymentLink} is not one of ours` };
 
-  const customer = await resolveCustomer(payment);
-  if (!customer) return { result: "skipped" as const, reason: "Cliente ainda não cadastrado pela base do Sheets; sincronize novamente após a importação." };
+  const customer = await resolveCustomer(payment, link);
+  if (!customer) return { result: "skipped" as const, reason: "E-mail do pagador não encontrado na aba ⭐ Base de Clientes; inclua-o lá para permitir a criação automática do cliente." };
   const subscription = await resolveSubscription(payment, link, customer);
   const result = await upsertPaymentRow(payment, link, customer, subscription);
   return { result, customerId: customer.id, subscriptionId: subscription.id, linkId: link.id };
