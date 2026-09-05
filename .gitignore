@@ -42,3 +42,8 @@ next-env.d.ts
 /.sites-runtime/
 /outputs/
 /work/
+
+# One-off exports/backups from scripts/legacy-import/*.mjs — these routinely
+# contain real client PII (names, emails, phones) dumped straight from
+# Supabase/Asaas, so they must never be committed.
+/scripts/legacy-import/data/
