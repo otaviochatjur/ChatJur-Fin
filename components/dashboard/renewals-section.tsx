@@ -14,7 +14,7 @@ export function RenewalsSection({ links, actors }: { links: PaymentLink[]; actor
     .map((link) => ({ link, renewalDate: addYears(link.created_at, 1) }))
     .sort((a, b) => a.renewalDate.getTime() - b.renewalDate.getTime());
 
-  const actorName = (id: string) => actors.find((actor) => actor.id === id)?.name ?? "—";
+  const actorName = (id: string | null) => actors.find((actor) => actor.id === id)?.name ?? "—";
   // Wall-clock time only drives a display label (days remaining), not
   // memoized derived state, so a single narrowly-scoped exception is safe.
   // eslint-disable-next-line react-hooks/purity

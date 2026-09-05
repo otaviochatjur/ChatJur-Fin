@@ -72,16 +72,20 @@ export type PriceVersion = {
 
 export type PaymentLink = {
   id: string;
-  actor_id: string;
+  /** Null for links pulled straight from Asaas that nobody has assigned to a partner/ambassador/sales rep yet. */
+  actor_id: string | null;
   plan_id: string | null;
   custom_plan_id: string | null;
   price_version_id: string | null;
+  asaas_payment_link_id?: string | null;
   url: string | null;
   display_name: string;
   value: number;
   billing_period: "MONTHLY" | "ANNUAL";
   max_installments: number | null;
   status: "ACTIVE" | "INACTIVE" | "PENDING";
+  /** 'ASAAS_API' = created here via "Gerar link"; 'ASAAS_SYNC' = imported from the Asaas account, created outside this app. */
+  source?: string;
   created_at: string;
   /** Real usage, computed server-side from `subscriptions`/`payments` — not the link's face value. */
   active_subscribers?: number;
@@ -337,7 +341,7 @@ export function computeActorMetrics(actors: CommercialActor[], subscriptions: Su
   const metrics: Record<string, ActorMetrics> = Object.fromEntries(actors.map((actor) => [actor.id, { clients: 0, mrr: 0, links: 0 }]));
 
   for (const link of links) {
-    if (link.status !== "ACTIVE") continue;
+    if (link.status !== "ACTIVE" || !link.actor_id) continue;
     const entry = metrics[link.actor_id];
     if (entry) entry.links += 1;
   }

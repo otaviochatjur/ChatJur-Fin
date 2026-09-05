@@ -173,7 +173,7 @@ function ClientDetail({ customer, subscriptions, payments, actors, links, events
     if (!paymentLinkId) return null;
     const link = linkById.get(paymentLinkId);
     if (!link) return null;
-    const actor = actorById.get(link.actor_id);
+    const actor = link.actor_id ? actorById.get(link.actor_id) : undefined;
     return `${link.display_name}${actor ? ` · parceiro: ${actor.name}` : ""}`;
   };
   const [status, setStatus] = useState<Customer["status"]>(customer.status);

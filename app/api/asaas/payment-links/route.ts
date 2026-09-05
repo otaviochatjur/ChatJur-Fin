@@ -81,3 +81,50 @@ export async function POST(request: Request) {
     return Response.json({ error: error instanceof Error ? error.message : "Erro ao gerar link." }, { status: 500 });
   }
 }
+
+type BindPayload = { id?: string; actorId?: string | null; planId?: string | null; status?: "ACTIVE" | "INACTIVE" | "PENDING" };
+
+/**
+ * Binds (or rebinds) a payment link to a partner/ambassador/sales rep and/or
+ * a plan. Used by the links management panel, mainly to resolve links that
+ * came from `sync-links` as orphans (created directly in the Asaas
+ * dashboard, so nobody here knows who they belong to or which plan they
+ * represent yet).
+ */
+export async function PATCH(request: Request) {
+  try {
+    const payload = (await request.json()) as BindPayload;
+    if (!payload.id) return Response.json({ error: "id é obrigatório." }, { status: 400 });
+
+    const [current] = await supabaseRequest<{ actor_id: string | null; plan_id: string | null; status: string }[]>(
+      `/rest/v1/payment_links?id=eq.${encodeURIComponent(payload.id)}&select=actor_id,plan_id,status`,
+    );
+    if (!current) return Response.json({ error: "Link não encontrado." }, { status: 404 });
+
+    const body: Record<string, unknown> = {};
+    if (payload.actorId !== undefined) body.actor_id = payload.actorId || null;
+    if (payload.planId !== undefined) body.plan_id = payload.planId || null;
+
+    const nextActorId = payload.actorId !== undefined ? payload.actorId : current.actor_id;
+    const nextPlanId = payload.planId !== undefined ? payload.planId : current.plan_id;
+    if (payload.status !== undefined) {
+      body.status = payload.status;
+    } else if (current.status === "PENDING" && nextActorId && nextPlanId) {
+      // Fully resolved now (both a plan and an owner) — automatically clears
+      // the "pending" flag without requiring a separate click.
+      body.status = "ACTIVE";
+    } else if (current.status !== "INACTIVE" && (!nextActorId || !nextPlanId)) {
+      body.status = "PENDING";
+    }
+    if (Object.keys(body).length === 0) return Response.json({ error: "Nada para atualizar." }, { status: 400 });
+
+    const [record] = await supabaseRequest<Record<string, unknown>[]>(`/rest/v1/payment_links?id=eq.${encodeURIComponent(payload.id)}`, {
+      method: "PATCH",
+      prefer: "return=representation",
+      body,
+    });
+    return Response.json({ record });
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : "Erro ao vincular link." }, { status: 500 });
+  }
+}

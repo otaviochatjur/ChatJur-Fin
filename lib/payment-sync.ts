@@ -2,7 +2,7 @@ import { fetchAsaasCustomer, type AsaasCustomer, type AsaasPayment } from "@/lib
 import { findClientInSheet } from "@/lib/clients-allowlist";
 import { supabaseRequest } from "@/lib/supabase-server";
 
-type PaymentLinkRow = { id: string; actor_id: string; plan_id: string | null; custom_plan_id: string | null; display_name: string; billing_period: "MONTHLY" | "ANNUAL"; value: number };
+type PaymentLinkRow = { id: string; actor_id: string | null; plan_id: string | null; custom_plan_id: string | null; display_name: string; billing_period: "MONTHLY" | "ANNUAL"; value: number };
 type CustomerRow = { id: string; email: string | null; asaas_customer_id: string | null; acquisition_actor_id: string | null; status: string };
 type SubscriptionRow = { id: string; status: string; asaas_subscription_id: string | null; asaas_installment_id: string | null };
 

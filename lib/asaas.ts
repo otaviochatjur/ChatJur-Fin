@@ -69,3 +69,23 @@ export function listAsaasPaymentsForLink(asaasPaymentLinkId: string, offset = 0)
     query: { paymentLink: asaasPaymentLinkId, limit: "100", offset: String(offset) },
   });
 }
+
+/** Shape of the payment link object as returned by GET /paymentLinks — includes links created directly in the Asaas dashboard, not just the ones this app generated. */
+export type AsaasPaymentLink = {
+  id: string;
+  name?: string | null;
+  url?: string | null;
+  value?: number | null;
+  billingType?: string | null;
+  chargeType?: "DETACHED" | "RECURRENT" | "INSTALLMENT" | null;
+  subscriptionCycle?: string | null;
+  maxInstallmentCount?: number | null;
+  externalReference?: string | null;
+  deleted?: boolean;
+};
+
+export function listAllAsaasPaymentLinks(offset = 0) {
+  return asaasRequest<{ data: AsaasPaymentLink[]; hasMore: boolean; totalCount: number }>("/paymentLinks", {
+    query: { limit: "100", offset: String(offset) },
+  });
+}

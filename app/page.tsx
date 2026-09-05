@@ -24,7 +24,7 @@ const sections = [
   { id: "payouts", label: "Repasses", Icon: Banknote, title: "Repasses", subtitle: "Comissão mensal sobre pagamentos recebidos por parceiro, embaixador, institucional e comercial externo" },
   { id: "revenue", label: "Receita e MRR", Icon: CircleDollarSign, title: "Receita e MRR", subtitle: "Faturamento recorrente consolidado" },
   { id: "renewals", label: "Renovações", Icon: CalendarClock, title: "Renovações", subtitle: "Contratos anuais próximos do vencimento" },
-  { id: "usage", label: "Uso e planos", Icon: Activity, title: "Uso e planos", subtitle: "Catálogo de planos e adoção por plano" },
+  { id: "usage", label: "Planos e Links", Icon: Activity, title: "Planos e Links", subtitle: "Catálogo de planos e vinculação dos links de pagamento" },
 ] as const;
 
 export default function Home() {
@@ -83,7 +83,7 @@ export default function Home() {
           {sectionId === "payouts" && <PayoutsSection actors={actors} subscriptions={subscriptions} payments={payments} customers={customers} />}
           {sectionId === "revenue" && <RevenueSection subscriptions={subscriptions} payments={payments} plans={plans} totals={totals} />}
           {sectionId === "renewals" && <RenewalsSection links={links} actors={actors} />}
-          {sectionId === "usage" && <PlansUsageSection plans={plans} links={links} />}
+          {sectionId === "usage" && <PlansUsageSection links={links} actors={actors} onChanged={reload} />}
         </div>
       </main>
     </div>
