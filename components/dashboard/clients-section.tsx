@@ -84,7 +84,12 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
       const response = await fetch("/api/asaas/sync-payments", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
       const data = await response.json();
       if (!response.ok) { toast.error(data.error ?? "Não foi possível sincronizar."); return; }
-      toast.success(`${data.payments} pagamento(s) sincronizado(s) de ${data.links} link(s).`);
+      const errorCount = data.errors?.length ?? 0;
+      if (errorCount > 0) {
+        toast.warning(`${data.payments} pagamento(s) sincronizado(s) de ${data.links} link(s), mas ${errorCount} link(s) falharam — clique em "Sincronizar pagamentos" novamente para tentar só esses.`);
+      } else {
+        toast.success(`${data.payments} pagamento(s) sincronizado(s) de ${data.links} link(s).`);
+      }
       onChanged();
     } finally {
       setSyncingAll(false);
