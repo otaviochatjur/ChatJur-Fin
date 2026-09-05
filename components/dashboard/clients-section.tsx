@@ -38,19 +38,6 @@ export function ClientsSection({ customers, subscriptions, payments, actors, lin
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [actorFilter, setActorFilter] = useState<string>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [syncingSheets, setSyncingSheets] = useState(false);
-  const [sheetIssues, setSheetIssues] = useState<{row: number; reason: string}[]>([]);
-  async function syncSheets() {
-    setSyncingSheets(true);
-    try {
-      const response = await fetch("/api/customers/sync-sheets", { method: "POST" });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error);
-      setSheetIssues(data.issues ?? []);
-      toast.success(`${data.created} cliente(s) incluído(s); ${data.preserved} preservado(s).`);
-      onChanged();
-    } catch (error) { toast.error(error instanceof Error ? error.message : "Falha ao sincronizar."); } finally { setSyncingSheets(false); }
-  }
   const [syncingAll, setSyncingAll] = useState(false);
 
   const actorName = (id: string | null) => actors.find((actor) => actor.id === id)?.name ?? "Orgânico / sem parceiro";
@@ -97,9 +84,8 @@ export function ClientsSection({ customers, subscriptions, payments, actors, lin
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
           <div>
             <h2 className="font-semibold">Clientes</h2>
-            <p className="mt-1 text-sm text-slate-500">Novos clientes vêm da aba ⭐ Base de Clientes do Google Sheets</p>
+            <p className="mt-1 text-sm text-slate-500">Novos clientes só entram se já constarem na aba ⭐ Base de Clientes do Google Sheets</p>
           </div>
-          <Button variant="outline" size="sm" disabled={syncingSheets} onClick={syncSheets}>{syncingSheets ? "Importando…" : "Sincronizar clientes do Sheets"}</Button>
           <Button variant="outline" size="sm" disabled={syncingAll} onClick={syncAllPayments}>{syncingAll ? "Sincronizando…" : "Sincronizar pagamentos"}</Button>
         </div>
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 p-4">
@@ -124,7 +110,6 @@ export function ClientsSection({ customers, subscriptions, payments, actors, lin
             </SelectContent>
           </Select>
         </div>
-        {sheetIssues.length > 0 && <details className="m-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm"><summary>{sheetIssues.length} linha(s) precisam de conferência</summary><ul className="mt-2 max-h-60 overflow-auto">{sheetIssues.map((issue, index) => <li key={index}>Linha {issue.row}: {issue.reason}</li>)}</ul></details>}
         <Table>
           <TableHeader>
             <TableRow><TableHead>Cliente</TableHead><TableHead>Status</TableHead><TableHead>Plano</TableHead><TableHead className="text-right">MRR</TableHead><TableHead>Parceiro</TableHead><TableHead>Assinado em</TableHead></TableRow>
