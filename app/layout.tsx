@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
 import { TallyEmbedLoader } from "@/components/tally-embed-loader";
+import { PointerEventsGuard } from "@/components/pointer-events-guard";
 
 export const metadata: Metadata = {
   title: "Chat Jurídico Financeiro",
@@ -16,6 +17,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         {children}
         <Toaster position="top-right" />
         <TallyEmbedLoader />
+        <PointerEventsGuard />
       </body>
     </html>
   );

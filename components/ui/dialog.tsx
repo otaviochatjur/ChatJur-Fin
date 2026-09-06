@@ -51,6 +51,7 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
@@ -64,6 +65,22 @@ function DialogContent({
           "fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
           className
         )}
+        onCloseAutoFocus={(event) => {
+          // Radix known issue when a Select/Popover (its own DismissableLayer,
+          // also portaled onto <body>) opens and closes while nested inside a
+          // Dialog: both layers try to save/restore <body>'s pointer-events, and
+          // the inner one can restore the wrong ("none") value once it unmounts.
+          // Symptom exactly as reported: the dialog opens but nothing inside it
+          // is clickable, and only a full close + reopen resets it — because
+          // that's the only thing that re-runs Radix's own pointer-events setup
+          // correctly. Every dialog in this app nests at least one <Select>
+          // (status, ator, tipo de registro...), so this is applied globally
+          // rather than patched per-usage.
+          // https://github.com/radix-ui/primitives/issues/2355
+          // https://github.com/radix-ui/primitives/issues/3445
+          onCloseAutoFocus?.(event);
+          if (document.body.style.pointerEvents === "none") document.body.style.pointerEvents = "";
+        }}
         {...props}
       >
         {children}
