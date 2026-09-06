@@ -146,7 +146,25 @@ export async function PATCH(request: Request) {
       prefer: "return=representation",
       body,
     });
-    return Response.json({ record });
+
+    // Retroativo: clientes que já pagaram por este link antes dele ter
+    // (ou ter mudado de) plano vinculado ficaram com plan_id nulo/errado nas
+    // suas assinaturas — lib/payment-sync.ts só grava plan_id na CRIAÇÃO da
+    // assinatura, nunca ao atualizar uma existente, então sem isso o vínculo
+    // do link com o plano nunca "voltaria no tempo" para quem já pagou. Isso
+    // importa de verdade: o cálculo de repasse por plano (findCommissionRate)
+    // e a quebra de receita por plano (Receita e MRR) dependem de
+    // subscriptions.plan_id, não do nome do link — daí o backfill imediato.
+    let backfilled: { subscriptions: number; implementationPayments: number } | null = null;
+    if (body.plan_id !== undefined) {
+      const [subs, impl] = await Promise.all([
+        supabaseRequest<unknown[]>(`/rest/v1/subscriptions?payment_link_id=eq.${encodeURIComponent(payload.id)}`, { method: "PATCH", prefer: "return=representation", body: { plan_id: body.plan_id } }).catch(() => []),
+        supabaseRequest<unknown[]>(`/rest/v1/implementation_payments?payment_link_id=eq.${encodeURIComponent(payload.id)}`, { method: "PATCH", prefer: "return=representation", body: { plan_id: body.plan_id } }).catch(() => []),
+      ]);
+      backfilled = { subscriptions: subs.length, implementationPayments: impl.length };
+    }
+
+    return Response.json({ record, backfilled });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Erro ao vincular link." }, { status: 500 });
   }

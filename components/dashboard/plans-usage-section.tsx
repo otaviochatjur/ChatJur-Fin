@@ -335,6 +335,15 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
     });
     const data = await response.json();
     if (!response.ok) { toast.error(data.error ?? "Não foi possível vincular."); return; }
+    // Vincular um plano retroage: quem já pagou por este link antes tem sua
+    // assinatura (ou pagamento de implantação/consultoria) atualizada agora
+    // — sem isso, repasse por plano e receita por plano ficariam errados
+    // para clientes antigos. Ver comentário na rota da API.
+    const b = data.backfilled;
+    if (b && (b.subscriptions > 0 || b.implementationPayments > 0)) {
+      const parts = [b.subscriptions > 0 ? `${b.subscriptions} assinatura(s)` : null, b.implementationPayments > 0 ? `${b.implementationPayments} pagamento(s) de implantação/consultoria` : null].filter(Boolean);
+      toast.success(`Plano vinculado. ${parts.join(" e ")} de clientes que já pagaram por este link foram atualizados retroativamente.`);
+    }
     onChanged();
   }
 
