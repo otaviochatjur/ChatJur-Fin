@@ -1,6 +1,7 @@
 type AsaasRequestOptions = {
-  method?: "GET" | "POST" | "PATCH" | "DELETE";
+  method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   query?: Record<string, string | undefined>;
+  body?: unknown;
 };
 
 export function getAsaasConfig() {
@@ -24,6 +25,7 @@ export async function asaasRequest<T>(path: string, options: AsaasRequestOptions
       "User-Agent": "ChatJuridicoFinanceiro/1.0",
       access_token: config.apiKey,
     },
+    ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
   });
   const text = await response.text();
   const data = text ? JSON.parse(text) : null;

@@ -163,7 +163,8 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
     setCustomPlans(custom);
     setPrices(Object.fromEntries(plans.map((plan) => {
       const current = versions.find((version) => version.plan_id === plan.id && version.effective_until === null);
-      return [plan.id, String(current ? current.value : plan.standard_value)];
+      // `plans` here is always RECURRING (see loadDetail's caller/comment below), so standard_value is never null in practice — the `?? 0` is just to satisfy the wider Plan type.
+      return [plan.id, String(current ? current.value : plan.standard_value ?? 0)];
     })));
     setInstallments(Object.fromEntries(plans.map((plan) => [plan.id, String(plan.annual_installment_limit ?? 6)])));
     setCustomEdits(Object.fromEntries(custom.map((item) => [item.id, { value: String(item.value), maxInstallments: String(item.max_installments ?? 6) }])));
@@ -188,7 +189,7 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
 
   function priceFor(plan: Plan) {
     const raw = Number(prices[plan.id]);
-    return Number.isFinite(raw) && raw > 0 ? raw : plan.standard_value;
+    return Number.isFinite(raw) && raw > 0 ? raw : plan.standard_value ?? 0;
   }
 
   function installmentsFor(plan: Plan) {
@@ -483,7 +484,7 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
             <div key={plan.id} className="rounded-xl border border-slate-200 p-3">
               <div className="flex items-center justify-between gap-2">
                 <div><p className="text-sm font-medium">{plan.name}</p><p className="text-xs text-slate-500">{plan.billing_period === "ANNUAL" ? "Anual · contrato de 12 meses" : "Mensal"}</p></div>
-                <Badge variant="outline">Tabela: {money.format(plan.standard_value)}</Badge>
+                <Badge variant="outline">Tabela: {money.format(plan.standard_value ?? 0)}</Badge>
               </div>
               <div className="mt-3 flex items-center gap-2">
                 <span className="text-sm text-slate-500">R$</span>

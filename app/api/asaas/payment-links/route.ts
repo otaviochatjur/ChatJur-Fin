@@ -1,3 +1,4 @@
+import { asaasRequest } from "@/lib/asaas";
 import { isOneTimePlanKind, isPaidStatus, type Plan } from "@/lib/metrics";
 import { supabaseRequest } from "@/lib/supabase-server";
 
@@ -86,18 +87,19 @@ type BindPayload = { id?: string; actorId?: string | null; planId?: string | nul
 
 /**
  * Binds (or rebinds) a payment link to a partner/ambassador/sales rep and/or
- * a plan. Used by the links management panel, mainly to resolve links that
- * came from `sync-links` as orphans (created directly in the Asaas
- * dashboard, so nobody here knows who they belong to or which plan they
- * represent yet).
+ * a plan, and/or manually toggles it ACTIVE/INACTIVE. Used by the links
+ * management panel, mainly to resolve links that came from `sync-links` as
+ * orphans (created directly in the Asaas dashboard, so nobody here knows
+ * who they belong to or which plan they represent yet) — and to let an
+ * operator deactivate a link straight from here.
  */
 export async function PATCH(request: Request) {
   try {
     const payload = (await request.json()) as BindPayload;
     if (!payload.id) return Response.json({ error: "id é obrigatório." }, { status: 400 });
 
-    const [current] = await supabaseRequest<{ actor_id: string | null; plan_id: string | null; status: string }[]>(
-      `/rest/v1/payment_links?id=eq.${encodeURIComponent(payload.id)}&select=actor_id,plan_id,status`,
+    const [current] = await supabaseRequest<{ actor_id: string | null; plan_id: string | null; status: string; asaas_payment_link_id: string | null }[]>(
+      `/rest/v1/payment_links?id=eq.${encodeURIComponent(payload.id)}&select=actor_id,plan_id,status,asaas_payment_link_id`,
     );
     if (!current) return Response.json({ error: "Link não encontrado." }, { status: 404 });
 
@@ -118,8 +120,18 @@ export async function PATCH(request: Request) {
 
     const nextActorId = payload.actorId !== undefined ? payload.actorId : current.actor_id;
     const nextPlanId = payload.planId !== undefined ? payload.planId : current.plan_id;
+    // A manual ACTIVE/INACTIVE toggle (the "Desativar"/"Reativar" button)
+    // always wins over the automatic PENDING/ACTIVE bookkeeping below, and —
+    // unlike that bookkeeping, which is purely local — mirrors onto the real
+    // link at Asaas so the payer actually can't pay it anymore either.
     if (payload.status !== undefined) {
       body.status = payload.status;
+      if ((payload.status === "ACTIVE" || payload.status === "INACTIVE") && current.asaas_payment_link_id) {
+        await asaasRequest(`/paymentLinks/${encodeURIComponent(current.asaas_payment_link_id)}`, {
+          method: "PUT",
+          body: { active: payload.status === "ACTIVE" },
+        });
+      }
     } else if (current.status === "PENDING" && nextActorId && nextPlanId) {
       // Fully resolved now (both a plan and an owner) — automatically clears
       // the "pending" flag without requiring a separate click.

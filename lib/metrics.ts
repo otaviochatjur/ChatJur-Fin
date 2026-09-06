@@ -53,7 +53,8 @@ export type Plan = {
   code: string;
   name: string;
   billing_period: "MONTHLY" | "ANNUAL" | "ONE_TIME";
-  standard_value: number;
+  /** Preço de referência. Obrigatório para RECURRING (sugestão ao gerar links para atores); opcional/null para IMPLEMENTATION e CONSULTING, cujo valor real é negociado por link — não existe um "preço de tabela" único de verdade para eles. */
+  standard_value: number | null;
   annual_installment_limit: number | null;
   status: "ACTIVE" | "INACTIVE";
   /** RECURRING = plano de assinatura (entra no MRR). IMPLEMENTATION = taxa única de implantação (API Oficial, Claude/IA, etc.). CONSULTING = taxa única de consultoria/assessoria avulsa. IMPLEMENTATION e CONSULTING nunca criam assinatura — pagamentos vão para `implementation_payments`. */

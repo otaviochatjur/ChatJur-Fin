@@ -25,10 +25,21 @@ type PlanPayload = {
   code?: string;
   name?: string;
   billingPeriod?: "MONTHLY" | "ANNUAL" | "ONE_TIME";
-  standardValue?: number;
+  standardValue?: number | string | null;
   annualInstallmentLimit?: number | null;
   kind?: Plan["kind"];
 };
+
+/** True when `value` was actually sent as a usable value (not undefined/null/blank). */
+function hasValue(value: number | string | null | undefined): boolean {
+  return value !== undefined && value !== null && String(value).trim() !== "";
+}
+
+async function currentPlanKind(id: string | undefined): Promise<Plan["kind"] | undefined> {
+  if (!id) return undefined;
+  const [plan] = await supabaseRequest<{ kind: Plan["kind"] }[]>(`/rest/v1/plans?id=eq.${encodeURIComponent(id)}&select=kind`);
+  return plan?.kind;
+}
 
 /** Manually registers a plan in the catalog, to then attach payment links to it. */
 export async function POST(request: Request) {
@@ -42,8 +53,16 @@ export async function POST(request: Request) {
     // produtos marcado como recorrente por engano.
     const billingPeriod = isOneTimePlanKind(kind) ? "ONE_TIME" : payload.billingPeriod;
     if (billingPeriod !== "MONTHLY" && billingPeriod !== "ANNUAL" && billingPeriod !== "ONE_TIME") return Response.json({ error: "Periodicidade inválida." }, { status: 400 });
-    const standardValue = Number(payload.standardValue);
-    if (!Number.isFinite(standardValue) || standardValue <= 0) return Response.json({ error: "Informe um valor padrão válido." }, { status: 400 });
+    // RECURRING exige um valor padrão (é a sugestão usada ao gerar links para
+    // atores). IMPLEMENTATION/CONSULTING não têm um "preço de tabela" único
+    // de verdade — cada link negocia seu próprio valor — então fica opcional.
+    let standardValue: number | null = null;
+    if (hasValue(payload.standardValue)) {
+      standardValue = Number(payload.standardValue);
+      if (!Number.isFinite(standardValue) || standardValue <= 0) return Response.json({ error: "Informe um valor padrão válido." }, { status: 400 });
+    } else if (!isOneTimePlanKind(kind)) {
+      return Response.json({ error: "Informe um valor padrão válido." }, { status: 400 });
+    }
     const annualInstallmentLimit = payload.annualInstallmentLimit != null ? Math.min(12, Math.max(1, Math.round(Number(payload.annualInstallmentLimit)))) : null;
 
     const [plan] = await supabaseRequest<Record<string, unknown>[]>("/rest/v1/plans", {
@@ -91,9 +110,17 @@ export async function PATCH(request: Request) {
       body.billing_period = payload.billingPeriod;
     }
     if (payload.standardValue !== undefined) {
-      const standardValue = Number(payload.standardValue);
-      if (!Number.isFinite(standardValue) || standardValue <= 0) return Response.json({ error: "Informe um valor padrão válido." }, { status: 400 });
-      body.standard_value = standardValue;
+      if (hasValue(payload.standardValue)) {
+        const standardValue = Number(payload.standardValue);
+        if (!Number.isFinite(standardValue) || standardValue <= 0) return Response.json({ error: "Informe um valor padrão válido." }, { status: 400 });
+        body.standard_value = standardValue;
+      } else {
+        // Limpando o valor padrão: só é permitido para Implantação/Consultoria
+        // (RECURRING sempre precisa de uma sugestão de preço para gerar links).
+        const kind = payload.kind ?? (await currentPlanKind(payload.id));
+        if (!isOneTimePlanKind(kind)) return Response.json({ error: "Informe um valor padrão válido." }, { status: 400 });
+        body.standard_value = null;
+      }
     }
     if (payload.annualInstallmentLimit !== undefined) {
       const raw = Number(payload.annualInstallmentLimit);
