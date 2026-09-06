@@ -290,6 +290,8 @@ function ClientDetail({ customer, subscriptions, payments, implementationPayment
   const [acquisitionActorId, setAcquisitionActorId] = useState<string>(customer.acquisition_actor_id ?? "none");
   const [saving, setSaving] = useState(false);
   const [addingPlan, setAddingPlan] = useState(false);
+  const [addingImplementationPayment, setAddingImplementationPayment] = useState(false);
+  const implementationPlans = plans.filter((plan) => (plan.kind === "IMPLEMENTATION" || plan.kind === "CONSULTING") && plan.status === "ACTIVE");
 
   async function save() {
     setSaving(true);
@@ -352,8 +354,20 @@ function ClientDetail({ customer, subscriptions, payments, implementationPayment
       </div>
 
       <div className="space-y-2 rounded-xl border border-violet-200 bg-violet-50/30 p-3">
-        <p className="text-xs font-medium uppercase tracking-[0.14em] text-violet-700">Implantações ({implementationPayments.length})</p>
-        {implementationPayments.length === 0 && <p className="text-sm text-slate-500">Nenhuma taxa de implantação (API Oficial, Claude/IA, etc.) registrada para este cliente.</p>}
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-violet-700">Implantações ({implementationPayments.length})</p>
+          <Button variant="outline" size="sm" onClick={() => setAddingImplementationPayment((current) => !current)}>{addingImplementationPayment ? "Cancelar" : "+ Registrar pagamento"}</Button>
+        </div>
+        {implementationPayments.length === 0 && !addingImplementationPayment && <p className="text-sm text-slate-500">Nenhuma taxa de implantação/consultoria registrada para este cliente. Se o cliente pagou fora do Asaas (transferência, dinheiro etc.), registre manualmente.</p>}
+        {addingImplementationPayment && (
+          <ManualImplementationPaymentForm
+            customerId={customer.id}
+            plans={implementationPlans}
+            actors={actors}
+            onDone={() => { setAddingImplementationPayment(false); onChanged(); }}
+            onCancel={() => setAddingImplementationPayment(false)}
+          />
+        )}
         <div className="max-h-48 space-y-1.5 overflow-y-auto">
           {implementationPayments.slice(0, 20).map((payment) => {
             const plan = payment.plan_id ? planById.get(payment.plan_id) : undefined;
@@ -366,6 +380,7 @@ function ClientDetail({ customer, subscriptions, payments, implementationPayment
               </div>
               <p className="flex items-center gap-1.5 truncate text-xs text-slate-500" title={payment.description}>
                 {plan && <Badge variant="outline" className={`shrink-0 text-[10px] ${planBadgeClass(plan)}`}>{planKindLabels[plan.kind]}</Badge>}
+                {payment.source === "MANUAL" && <Badge variant="outline" className="shrink-0 text-[10px] border-slate-200 bg-slate-50 text-slate-500">Manual</Badge>}
                 <span className="truncate">{payment.description}</span>
               </p>
             </div>
@@ -492,6 +507,82 @@ function ManualSubscriptionForm({ customerId, onDone, onCancel }: { customerId: 
       <div className="flex gap-2">
         <Button size="sm" variant="ghost" onClick={onCancel}>Cancelar</Button>
         <Button size="sm" className="flex-1 bg-[#3a5d9d] text-white hover:bg-[#2c4a80]" disabled={saving || !planName.trim() || !(Number(value) > 0)} onClick={save}>{saving ? "Salvando…" : "Salvar plano"}</Button>
+      </div>
+    </div>
+  );
+}
+
+/** Registers an implantação/consultoria payment that happened outside the Asaas link flow (ex: cliente pagou uma consultoria por transferência). Mirrors `ManualSubscriptionForm`'s "cobrado fora do Asaas" pattern, but writes to `implementation_payments` instead — never touches MRR/subscriptions. */
+function ManualImplementationPaymentForm({ customerId, plans, actors, onDone, onCancel }: { customerId: string; plans: Plan[]; actors: CommercialActor[]; onDone: () => void; onCancel: () => void }) {
+  const [planId, setPlanId] = useState("none");
+  const [description, setDescription] = useState("");
+  const [value, setValue] = useState("");
+  const [billingType, setBillingType] = useState("");
+  const [actorId, setActorId] = useState("none");
+  const [paymentDate, setPaymentDate] = useState(localDate);
+  const [saving, setSaving] = useState(false);
+
+  function onPlanChange(id: string) {
+    setPlanId(id);
+    if (id === "none") return;
+    const plan = plans.find((candidate) => candidate.id === id);
+    if (plan && !description.trim()) setDescription(plan.name);
+  }
+
+  async function save() {
+    if (saving) return;
+    setSaving(true);
+    try {
+      const response = await fetch("/api/implementation-payments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customerId,
+          planId: planId === "none" ? null : planId,
+          actorId: actorId === "none" ? null : actorId,
+          description,
+          value: Number(value),
+          billingType: billingType || null,
+          paymentDate,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) { toast.error(data.error ?? "Não foi possível registrar o pagamento."); return; }
+      toast.success("Pagamento registrado.");
+      onDone();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2 rounded-lg border border-dashed border-violet-400 bg-violet-50/50 p-3">
+      <p className="text-xs text-slate-500">Use isto para uma implantação ou consultoria paga fora do Asaas (transferência, dinheiro etc.). Não gera cobrança nenhuma, só registra o recebimento — nunca entra no MRR/assinaturas.</p>
+      <Select value={planId} onValueChange={onPlanChange}>
+        <SelectTrigger className="w-full"><SelectValue placeholder="Plano (opcional)" /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="none">Sem plano do catálogo</SelectItem>
+          {plans.map((plan) => <SelectItem key={plan.id} value={plan.id}>{plan.name}</SelectItem>)}
+        </SelectContent>
+      </Select>
+      <Input placeholder="Descrição" value={description} onChange={(event) => setDescription(event.target.value)} />
+      <div className="grid grid-cols-2 gap-2">
+        <Input type="number" min="0.01" step="0.01" placeholder="Valor pago (R$)" value={value} onChange={(event) => setValue(event.target.value)} />
+        <Input type="date" value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} />
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <Input placeholder="Forma de pagamento (opcional)" value={billingType} onChange={(event) => setBillingType(event.target.value)} />
+        <Select value={actorId} onValueChange={setActorId}>
+          <SelectTrigger><SelectValue placeholder="Parceiro (opcional)" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none">Sem parceiro</SelectItem>
+            {actors.map((actor) => <SelectItem key={actor.id} value={actor.id}>{actor.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="flex gap-2">
+        <Button size="sm" variant="ghost" onClick={onCancel}>Cancelar</Button>
+        <Button size="sm" className="flex-1 bg-[#3a5d9d] text-white hover:bg-[#2c4a80]" disabled={saving || !description.trim() || !(Number(value) > 0)} onClick={save}>{saving ? "Salvando…" : "Salvar pagamento"}</Button>
       </div>
     </div>
   );

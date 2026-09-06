@@ -230,7 +230,10 @@ export type ImplementationPayment = {
   actor_id: string | null;
   payment_link_id: string | null;
   plan_id: string | null;
-  asaas_payment_id: string;
+  /** NULL when `source === "MANUAL"` — no Asaas payment behind it. */
+  asaas_payment_id: string | null;
+  /** SYSTEM = sincronizado de um pagamento real no Asaas. MANUAL = registrado à mão (pago fora do Asaas: transferência, dinheiro, etc.), ver `POST /api/implementation-payments`. */
+  source: "SYSTEM" | "MANUAL";
   description: string;
   status: string;
   value: number;
