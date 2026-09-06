@@ -68,6 +68,22 @@ export function isOneTimePlanKind(kind: Plan["kind"] | null | undefined): boolea
   return kind === "IMPLEMENTATION" || kind === "CONSULTING";
 }
 
+/**
+ * Badge color for a plan, shown next to its name wherever it shows up
+ * (catalog, bound-link hint, client's Implantações list). For Implantação
+ * specifically, which integration it is matters more than the generic
+ * kind, so Meta and Claude/IA each get their own color to spot at a glance;
+ * any other one-time plan falls back to a shared color per kind.
+ */
+export function planBadgeClass(plan: Pick<Plan, "kind" | "code">): string | undefined {
+  if (plan.kind === "CONSULTING") return "border-amber-200 bg-amber-50 text-amber-700";
+  if (plan.kind !== "IMPLEMENTATION") return undefined;
+  const code = plan.code.toUpperCase();
+  if (code.includes("META")) return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (code.includes("CLAUDE")) return "border-orange-200 bg-orange-50 text-orange-700";
+  return "border-violet-200 bg-violet-50 text-violet-700";
+}
+
 export type PriceVersion = {
   id: string;
   actor_id: string;

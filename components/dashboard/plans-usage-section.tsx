@@ -9,15 +9,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge } from "@/components/dashboard/status-badge";
 import { ColumnVisibilityMenu, ResizableTh, useColumnVisibility, useColumnWidths, type ColumnDef } from "@/components/dashboard/table-toolbar";
-import { isOneTimePlanKind, money, planKindLabels, type CommercialActor, type PaymentLink, type Plan } from "@/lib/metrics";
+import { isOneTimePlanKind, money, planBadgeClass, planKindLabels, type CommercialActor, type PaymentLink, type Plan } from "@/lib/metrics";
 
 const linkFilters = ["ALL", "PENDING", "ACTIVE", "INACTIVE"] as const;
 const linkFilterLabels: Record<(typeof linkFilters)[number], string> = { ALL: "Todos", PENDING: "Pendentes", ACTIVE: "Vinculados", INACTIVE: "Inativos" };
 
 const planKindFilters = ["ALL", "RECURRING", "IMPLEMENTATION", "CONSULTING"] as const;
 const planKindFilterLabels: Record<(typeof planKindFilters)[number], string> = { ALL: "Todos", RECURRING: "Planos", IMPLEMENTATION: "Implantações", CONSULTING: "Consultorias" };
-/** Badge color for each plan kind, shared between the catalog table and the payment-links table's "bound plan" hint. */
-const planKindBadgeClass: Record<Plan["kind"], string | undefined> = { RECURRING: undefined, IMPLEMENTATION: "border-violet-200 bg-violet-50 text-violet-700", CONSULTING: "border-amber-200 bg-amber-50 text-amber-700" };
 
 const planStatusFilters = ["ALL", "ACTIVE", "INACTIVE"] as const;
 const planStatusFilterLabels: Record<(typeof planStatusFilters)[number], string> = { ALL: "Todos", ACTIVE: "Ativos", INACTIVE: "Inativos" };
@@ -229,7 +227,7 @@ function PlanRow({ plan, activeLinks, editing, visibleColumns, onEdit, onCancelE
     return (
       <TableRow>
         <TableCell><Input value={name} onChange={(event) => setName(event.target.value)} /></TableCell>
-        {visibleColumns("kind") && <TableCell><Badge variant="outline" className={planKindBadgeClass[plan.kind]}>{planKindLabels[plan.kind]}</Badge></TableCell>}
+        {visibleColumns("kind") && <TableCell><Badge variant="outline" className={planBadgeClass(plan)}>{planKindLabels[plan.kind]}</Badge></TableCell>}
         {visibleColumns("billingPeriod") && <TableCell><Badge variant="outline">{billingPeriodLabel}</Badge></TableCell>}
         {visibleColumns("value") && <TableCell className="text-right"><Input className="text-right" type="number" min="0.01" step="0.01" value={standardValue} onChange={(event) => setStandardValue(event.target.value)} /></TableCell>}
         {visibleColumns("installments") && <TableCell>{showInstallments ? <Input type="number" min="1" max="12" value={annualInstallmentLimit} onChange={(event) => setAnnualInstallmentLimit(event.target.value)} /> : "—"}</TableCell>}
@@ -246,7 +244,7 @@ function PlanRow({ plan, activeLinks, editing, visibleColumns, onEdit, onCancelE
   return (
     <TableRow>
       <TableCell className="font-medium">{plan.name} <span className="text-xs text-slate-400">· {plan.code}</span></TableCell>
-      {visibleColumns("kind") && <TableCell><Badge variant="outline" className={planKindBadgeClass[plan.kind]}>{planKindLabels[plan.kind]}</Badge></TableCell>}
+      {visibleColumns("kind") && <TableCell><Badge variant="outline" className={planBadgeClass(plan)}>{planKindLabels[plan.kind]}</Badge></TableCell>}
       {visibleColumns("billingPeriod") && <TableCell><Badge variant="outline">{billingPeriodLabel}</Badge></TableCell>}
       {visibleColumns("value") && <TableCell className="text-right">{money.format(plan.standard_value)}</TableCell>}
       {visibleColumns("installments") && <TableCell>{plan.annual_installment_limit ? `até ${plan.annual_installment_limit}x` : "—"}</TableCell>}
@@ -349,7 +347,7 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
             <TableRow key={link.id}>
               <TableCell className="max-w-[240px] truncate font-medium" title={link.display_name}>
                 {link.display_name}
-                {boundPlan && isOneTimePlanKind(boundPlan.kind) && <Badge variant="outline" className={`ml-2 text-[10px] ${planKindBadgeClass[boundPlan.kind]}`}>{planKindLabels[boundPlan.kind]}</Badge>}
+                {boundPlan && isOneTimePlanKind(boundPlan.kind) && <Badge variant="outline" className={`ml-2 text-[10px] ${planBadgeClass(boundPlan)}`}>{planKindLabels[boundPlan.kind]}</Badge>}
               </TableCell>
               {columns.isVisible("actor") && (
                 <TableCell>

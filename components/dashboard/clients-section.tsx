@@ -14,7 +14,7 @@ import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ColumnVisibilityMenu, ResizableTh, useColumnVisibility, useColumnWidths, type ColumnDef } from "@/components/dashboard/table-toolbar";
-import { isPaidStatus, money, monthlyValue, roleLabels, type CommercialActor, type Customer, type ImplementationPayment, type Payment, type PaymentLink, type Subscription } from "@/lib/metrics";
+import { isPaidStatus, money, monthlyValue, planBadgeClass, planKindLabels, roleLabels, type CommercialActor, type Customer, type ImplementationPayment, type Payment, type PaymentLink, type Plan, type Subscription } from "@/lib/metrics";
 import { localDate } from "@/lib/customer-activity";
 
 const clientColumns: ColumnDef<"status" | "plan" | "mrr" | "actor" | "signedAt">[] = [
@@ -80,11 +80,12 @@ function fmtDateTime(value: string) {
   return new Date(value).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 }
 
-export function ClientsSection({ customers, subscriptions, payments, implementationPayments, actors, links, events, onChanged }: {
+export function ClientsSection({ customers, subscriptions, payments, implementationPayments, plans, actors, links, events, onChanged }: {
   customers: Customer[];
   subscriptions: Subscription[];
   payments: Payment[];
   implementationPayments: ImplementationPayment[];
+  plans: Plan[];
   actors: CommercialActor[];
   links: PaymentLink[];
   events: CustomerActivity[];
@@ -248,6 +249,7 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
             subscriptions={selectedSubscriptions}
             payments={selectedPayments}
             implementationPayments={selectedImplementationPayments}
+            plans={plans}
             actors={actors}
             links={links}
             events={events.filter(event => event.customerId === selected.id)}
@@ -260,17 +262,19 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
   );
 }
 
-function ClientDetail({ customer, subscriptions, payments, implementationPayments, actors, links, events, onChanged }: {
+function ClientDetail({ customer, subscriptions, payments, implementationPayments, plans, actors, links, events, onChanged }: {
   customer: Customer;
   subscriptions: Subscription[];
   payments: Payment[];
   implementationPayments: ImplementationPayment[];
+  plans: Plan[];
   actors: CommercialActor[];
   links: PaymentLink[];
   events: CustomerActivity[];
   onChanged: () => void;
 }) {
   const linkById = new Map(links.map((link) => [link.id, link]));
+  const planById = new Map(plans.map((plan) => [plan.id, plan]));
   const actorById = new Map(actors.map((actor) => [actor.id, actor]));
   const linkLabel = (paymentLinkId: string | null) => {
     if (!paymentLinkId) return null;
@@ -351,16 +355,22 @@ function ClientDetail({ customer, subscriptions, payments, implementationPayment
         <p className="text-xs font-medium uppercase tracking-[0.14em] text-violet-700">Implantações ({implementationPayments.length})</p>
         {implementationPayments.length === 0 && <p className="text-sm text-slate-500">Nenhuma taxa de implantação (API Oficial, Claude/IA, etc.) registrada para este cliente.</p>}
         <div className="max-h-48 space-y-1.5 overflow-y-auto">
-          {implementationPayments.slice(0, 20).map((payment) => (
+          {implementationPayments.slice(0, 20).map((payment) => {
+            const plan = payment.plan_id ? planById.get(payment.plan_id) : undefined;
+            return (
             <div key={payment.id} className="text-sm">
               <div className="flex items-center justify-between gap-2">
                 <span className={isPaidStatus(payment.status) ? "text-emerald-700" : "text-slate-500"}>{payment.status}</span>
                 <span className="text-slate-500">{fmtDate(payment.payment_date ?? payment.due_date)}</span>
                 <span className="font-medium">{money.format(payment.value)}</span>
               </div>
-              <p className="truncate text-xs text-slate-500" title={payment.description}>{payment.description}</p>
+              <p className="flex items-center gap-1.5 truncate text-xs text-slate-500" title={payment.description}>
+                {plan && <Badge variant="outline" className={`shrink-0 text-[10px] ${planBadgeClass(plan)}`}>{planKindLabels[plan.kind]}</Badge>}
+                <span className="truncate">{payment.description}</span>
+              </p>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
