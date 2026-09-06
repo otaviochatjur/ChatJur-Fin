@@ -246,6 +246,57 @@ async function upsertImplementationPayment(payment: AsaasPayment, link: PaymentL
   return "created" as const;
 }
 
+/**
+ * Recognizes a paymentLink-less charge as an implantação/consultoria one-off
+ * by its description, e.g. "Consultoria Chat Jurídico - Parcela 2/4" — a
+ * standalone boleto/parcelamento created directly in the Asaas dashboard for
+ * a one-time product, with no link and no relation to the customer's real
+ * recurring subscription at all.
+ *
+ * Real case that surfaced this: a client (Wilker) has both a genuine MONTHLY
+ * subscription (via a link, PIX) *and*, completely separately, paid a
+ * consultoria in 4 boleto installments created straight in Asaas. Those 4
+ * installments have no `paymentLink`, so before this check they fell into
+ * `resolveOrphanSubscription`'s "customer has exactly one subscription"
+ * fallback — getting merged into the *subscription's* payment history and,
+ * worse, overwriting its MRR-bearing `value` with the consultoria's R$2497,50.
+ * Checking the description first, before ever touching subscription
+ * resolution, keeps unrelated one-time charges out of MRR/subscriptions
+ * regardless of how many (or how few) real subscriptions the customer has.
+ */
+function detectOrphanOneTimeKind(description: string): "IMPLEMENTATION" | "CONSULTING" | null {
+  const normalized = description.trim().toLowerCase();
+  if (/^consultoria\b/.test(normalized)) return "CONSULTING";
+  if (/^implanta[cç][aã]o\b/.test(normalized)) return "IMPLEMENTATION";
+  return null;
+}
+
+/** Same ledger as `upsertImplementationPayment`, but for a paymentLink-less charge (see `detectOrphanOneTimeKind`) — no `payment_link_id`/`plan_id` to attach, just the customer and the raw description. */
+async function upsertOrphanImplementationPayment(payment: AsaasPayment, customer: CustomerRow) {
+  const body = {
+    customer_id: customer.id,
+    payment_link_id: null,
+    plan_id: null,
+    asaas_payment_id: payment.id,
+    description: payment.description || "Implantação/consultoria (sem link)",
+    status: payment.status,
+    value: payment.value,
+    net_value: payment.netValue ?? null,
+    billing_type: payment.billingType ?? null,
+    due_date: payment.dueDate ?? null,
+    payment_date: payment.paymentDate ?? payment.clientPaymentDate ?? null,
+    confirmed_date: payment.confirmedDate ?? null,
+    raw_payload: payment,
+  };
+  const existing = await findOne<{ id: string }>(`/rest/v1/implementation_payments?select=id&asaas_payment_id=eq.${encodeURIComponent(payment.id)}`);
+  if (existing) {
+    await supabaseRequest(`/rest/v1/implementation_payments?id=eq.${existing.id}`, { method: "PATCH", body });
+    return "updated" as const;
+  }
+  await supabaseRequest("/rest/v1/implementation_payments", { method: "POST", body });
+  return "created" as const;
+}
+
 async function upsertPaymentRow(payment: AsaasPayment, paymentLinkId: string | null, customer: CustomerRow, subscription: SubscriptionRow) {
   const body = {
     subscription_id: subscription.id,
@@ -394,6 +445,16 @@ export async function syncAsaasPayment(payment: AsaasPayment) {
     `/rest/v1/customers?select=id,email,asaas_customer_id,acquisition_actor_id,status&asaas_customer_id=eq.${encodeURIComponent(payment.customer)}`,
   );
   if (!customer) return { result: "skipped" as const, reason: "no paymentLink and this Asaas customer isn't one of ours yet" };
+
+  // Checked before ever trying to match a subscription: an orphan charge
+  // whose description reads as a one-time implantação/consultoria product
+  // is never part of the customer's recurring plan, no matter how many (or
+  // how few) subscriptions they have — see `detectOrphanOneTimeKind`.
+  const oneTimeKind = detectOrphanOneTimeKind(payment.description ?? "");
+  if (oneTimeKind) {
+    const result = await upsertOrphanImplementationPayment(payment, customer);
+    return { result, customerId: customer.id, subscriptionId: null, linkId: null, implementation: true as const };
+  }
 
   const existingSubscription = await resolveOrphanSubscription(payment, customer);
   if (!existingSubscription) return { result: "skipped" as const, reason: "no paymentLink and no existing subscription to attach this payment to" };
