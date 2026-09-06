@@ -65,16 +65,27 @@ export function fetchAsaasCustomer(customerId: string) {
 }
 
 /**
+ * Lists payments across the WHOLE Asaas account (not scoped to one link).
+ *
+ * This exists instead of a per-link `?paymentLink=` call because that query
+ * param turned out to be a no-op on Asaas's side — confirmed empirically: a
+ * real link id, a nonexistent one, and no filter at all every returned the
+ * exact same `totalCount` for this account. So a loop that called this once
+ * per payment link was actually re-walking the account's *entire* payment
+ * history once per link (241 links × ~4,000 payments here) — the real
+ * reason a manual sync could take hours instead of minutes. Each payment
+ * object *does* carry its own correct `paymentLink` id though, which is how
+ * `syncAsaasPayment` (lib/payment-sync.ts) routes it to the right record —
+ * so one global, paginated walk covers every link in a single pass.
+ *
  * `since` (ISO date, e.g. "2026-08-01") filters to payments created on/after
- * that date via Asaas's `dateCreated[ge]`, so a repeat sync doesn't re-walk a
- * link's entire history — some payment links here have 3-4 thousand
- * payments (e.g. a shared/generic link reused across many clients over
- * time), which at Asaas's own ~2-4s per 100-item page took minutes for a
- * *single* link. Omit `since` for a link's first-ever sync (full history).
+ * that date via `dateCreated[ge]`, so a repeat sync only walks what's new
+ * since the last run instead of the full history again. Omit for a full
+ * historical backfill (first-ever sync).
  */
-export function listAsaasPaymentsForLink(asaasPaymentLinkId: string, offset = 0, since?: string) {
+export function listAsaasPayments(offset = 0, since?: string) {
   return asaasRequest<{ data: AsaasPayment[]; hasMore: boolean; totalCount: number }>("/payments", {
-    query: { paymentLink: asaasPaymentLinkId, limit: "100", offset: String(offset), "dateCreated[ge]": since },
+    query: { limit: "100", offset: String(offset), "dateCreated[ge]": since },
   });
 }
 

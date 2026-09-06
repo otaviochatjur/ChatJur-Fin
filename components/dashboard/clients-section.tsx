@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CustomerTimeline } from "@/components/dashboard/customer-timeline";
 import type { CustomerActivity } from "@/lib/customer-activity";
 import { Search } from "lucide-react";
@@ -35,6 +35,16 @@ function fmtDate(value: string | null) {
   return value ? new Date(value).toLocaleDateString("pt-BR") : "—";
 }
 
+type PaymentSyncRun = {
+  action: "COMPLETED" | "FAILED";
+  created_at: string;
+  after_json: { linksTotal?: number; linksOk?: number; payments?: number; errors?: { linkId: string; message: string }[]; error?: string } | null;
+};
+
+function fmtDateTime(value: string) {
+  return new Date(value).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+}
+
 export function ClientsSection({ customers, subscriptions, payments, implementationPayments, actors, links, events, onChanged }: {
   customers: Customer[];
   subscriptions: Subscription[];
@@ -50,7 +60,21 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
   const [actorFilter, setActorFilter] = useState<string>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [syncingAll, setSyncingAll] = useState(false);
+  const [lastSync, setLastSync] = useState<PaymentSyncRun | null>(null);
   const columns = useColumnVisibility(clientColumns);
+
+  async function loadLastSync() {
+    const response = await fetch("/api/audit-events?entityType=payment_sync&limit=1");
+    const data = await response.json();
+    // setState here only runs after the await above resolves — not a
+    // synchronous effect update (react-hooks/set-state-in-effect).
+    setLastSync(response.ok ? data.events?.[0] ?? null : null);
+  }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- loadLastSync only calls setState after its internal await resolves.
+    loadLastSync();
+  }, []);
 
   const actorName = (id: string | null) => actors.find((actor) => actor.id === id)?.name ?? "Orgânico / sem parceiro";
 
@@ -93,6 +117,7 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
       onChanged();
     } finally {
       setSyncingAll(false);
+      await loadLastSync();
     }
   }
 
@@ -104,7 +129,21 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
             <h2 className="font-semibold">Clientes</h2>
             <p className="mt-1 text-sm text-slate-500">Novos clientes só entram se já constarem na aba ⭐ Base de Clientes do Google Sheets</p>
           </div>
-          <Button variant="outline" size="sm" disabled={syncingAll} onClick={syncAllPayments}>{syncingAll ? "Sincronizando…" : "Sincronizar pagamentos"}</Button>
+          <div className="flex flex-col items-end gap-1">
+            <Button variant="outline" size="sm" disabled={syncingAll} onClick={syncAllPayments}>{syncingAll ? "Sincronizando…" : "Sincronizar pagamentos"}</Button>
+            {lastSync && (
+              lastSync.action === "FAILED" ? (
+                <p className="text-xs text-red-600" title={lastSync.after_json?.error ?? ""}>Última sincronização falhou em {fmtDateTime(lastSync.created_at)}</p>
+              ) : (
+                <p className="text-xs text-slate-500">
+                  Última sincronização: {fmtDateTime(lastSync.created_at)} · {lastSync.after_json?.payments ?? 0} pagamento(s)
+                  {lastSync.after_json?.errors && lastSync.after_json.errors.length > 0 && (
+                    <span className="text-amber-600" title={lastSync.after_json.errors.map((error) => error.message).join("\n")}> · {lastSync.after_json.errors.length} link(s) falharam</span>
+                  )}
+                </p>
+              )
+            )}
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 p-4">
           <div className="relative flex-1 min-w-[200px]">

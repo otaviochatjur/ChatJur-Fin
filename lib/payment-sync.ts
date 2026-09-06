@@ -76,6 +76,22 @@ async function resolveCustomer(payment: AsaasPayment, link: PaymentLinkRow): Pro
   const sheetRow = details.email ? await findClientInSheet(details.email) : null;
   if (gateEnabled && !sheetRow) return null;
 
+  // Same office, second Asaas customer id: happens when a client ends up
+  // with more than one Asaas customer record for the same office (re-signed
+  // up, different document/email on a later purchase, etc.). `external_office_id`
+  // is unique per office, so inserting a second customer row for it would
+  // violate that constraint — reuse the existing office record instead of
+  // creating a duplicate. Its `asaas_customer_id` stays pointed at whichever
+  // Asaas identity was seen first; this payment's `payment.customer` is a
+  // different id for the same real client, so subscriptions/payments below
+  // still attach correctly via `customer_id`.
+  if (sheetRow?.officeId) {
+    const byOffice = await findOne<CustomerRow>(
+      `/rest/v1/customers?select=id,email,asaas_customer_id,acquisition_actor_id,status&external_office_id=eq.${encodeURIComponent(sheetRow.officeId)}`,
+    );
+    if (byOffice) return byOffice;
+  }
+
   const [created] = await supabaseRequest<CustomerRow[]>("/rest/v1/customers", {
     method: "POST",
     prefer: "return=representation",
