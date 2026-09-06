@@ -131,18 +131,35 @@ async function resolveSubscription(payment: AsaasPayment, link: PaymentLinkRow, 
   }
   // Either this payment carries no subscription/installment id at all (the
   // very first payment on a link, before Asaas assigns one), or it carries
-  // one that's new to us. Both cases fall back to "does this customer
-  // already have a not-yet-cancelled row for this exact link, without a
-  // subscription/installment id of its own yet" — the placeholder row an
-  // earlier link-less payment would have created. Reusing it (and adopting
-  // whatever id this payment has) avoids creating a second row for what's
-  // really the same subscription, which used to silently split a client's
-  // payment history in two (e.g. Abussafi: 1 old placeholder row + 1 real
-  // row, each only seeing part of the payments).
+  // one that's new to us — which can happen more than once over a client's
+  // lifetime: Asaas can recreate/reassign a subscription's id mid-relationship
+  // (payment method change, manual edit in their dashboard, etc.), and each
+  // time it does, the *old* id simply stops appearing on new payments. Both
+  // cases fall back to "this customer's one live (non-cancelled) row for
+  // this exact link" and adopt whatever id this payment carries onto it,
+  // instead of spawning a new row every time the id changes — which used to
+  // silently fragment a client's payment history across multiple rows (e.g.
+  // Abussafi: 3 rows for one real subscription, each only seeing part of
+  // the payments, discovered across two separate rescans).
   if (!existing) {
-    existing = await findOne<SubscriptionRow>(
-      `/rest/v1/subscriptions?select=id,status,asaas_subscription_id,asaas_installment_id&customer_id=eq.${customer.id}&payment_link_id=eq.${link.id}&asaas_subscription_id=is.null&asaas_installment_id=is.null&status=neq.CANCELLED`,
+    const candidates = await supabaseRequest<SubscriptionRow[]>(
+      `/rest/v1/subscriptions?select=id,status,asaas_subscription_id,asaas_installment_id&customer_id=eq.${customer.id}&payment_link_id=eq.${link.id}&status=neq.CANCELLED`,
     );
+    if (candidates.length === 1) {
+      existing = candidates[0];
+    } else if (candidates.length > 1) {
+      // Shouldn't normally happen post-fix, but if it does (e.g. a rescan
+      // racing itself), pick whichever was paid most recently rather than
+      // fragmenting further; older duplicates get cleaned up separately.
+      const withLastPaid = await Promise.all(
+        candidates.map(async (row) => {
+          const last = await findOne<{ due_date: string | null }>(`/rest/v1/payments?select=due_date&subscription_id=eq.${row.id}&order=due_date.desc,id.desc&limit=1`);
+          return { row, lastDate: last?.due_date ?? "" };
+        }),
+      );
+      withLastPaid.sort((a, b) => b.lastDate.localeCompare(a.lastDate));
+      existing = withLastPaid[0].row;
+    }
   }
 
   if (existing) {
@@ -297,7 +314,7 @@ async function resolveOrphanSubscription(payment: AsaasPayment, customer: Custom
     if (sameLink || samePlan) {
       const withLastPaid = await Promise.all(
         active.map(async (row) => {
-          const last = await findOne<{ due_date: string | null }>(`/rest/v1/payments?select=due_date&subscription_id=eq.${row.id}&order=due_date.desc&limit=1`);
+          const last = await findOne<{ due_date: string | null }>(`/rest/v1/payments?select=due_date&subscription_id=eq.${row.id}&order=due_date.desc,id.desc&limit=1`);
           return { row, lastDate: last?.due_date ?? "" };
         }),
       );
