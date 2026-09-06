@@ -343,6 +343,20 @@ async function upsertPaymentRow(payment: AsaasPayment, paymentLinkId: string | n
  * link) rather than genuinely distinct products — in that case the one
  * with the most recent payment wins, since it's the row this migration is
  * continuing. Otherwise we skip rather than guess.
+ *
+ * CRITICAL GUARDRAIL: the "customer's one subscription" fallback below only
+ * ever runs when Asaas itself tags the payment as `subscription`/
+ * `installment` — i.e. Asaas is already telling us "this belongs to a
+ * recurring/parcelado cycle", we just haven't seen *this specific* id yet
+ * (Fabilson's case: id changed when the price changed directly in Asaas,
+ * but every payment since kept carrying a `subscription` id). A payment
+ * with *neither* field is a fully standalone avulsa charge with zero
+ * billing-cycle metadata from Asaas — attaching those by guesswork is what
+ * silently merged one-off "Consultoria"/other avulsa charges into an
+ * unrelated subscription and corrupted its MRR value for Wilker Amaral and
+ * Almeida Marques (both really the same client, two different offices).
+ * Those must go through `detectOrphanOneTimeKind` (if recognizable) or be
+ * skipped entirely — never guessed into a subscription.
  */
 async function resolveOrphanSubscription(payment: AsaasPayment, customer: CustomerRow): Promise<SubscriptionFullRow | null> {
   if (payment.subscription) {
@@ -357,6 +371,7 @@ async function resolveOrphanSubscription(payment: AsaasPayment, customer: Custom
     );
     if (byInstallment) return byInstallment;
   }
+  if (!payment.subscription && !payment.installment) return null;
   const candidates = await supabaseRequest<SubscriptionFullRow[]>(
     `/rest/v1/subscriptions?select=${SUBSCRIPTION_FULL_SELECT}&customer_id=eq.${customer.id}`,
   );
