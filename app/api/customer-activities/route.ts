@@ -36,6 +36,17 @@ async function validatePayload(payload: z.infer<typeof activitySchema>, excludeE
   return null;
 }
 
+/** Logging a CANCELLATION is the operator's authoritative signal that the relationship ended: mirror it onto `customers.status` (and `cancelled_at`/`cancellation_reason`) instead of leaving that in sync only by a separate manual edit. Deliberately doesn't touch `subscriptions.status` — a customer can have more than one subscription, and which one(s) to mark CANCELLED is still a manual per-subscription call (see the status editor on each subscription card). */
+async function syncCancellationOntoCustomer(payload: z.infer<typeof activitySchema>) {
+  if (payload.type !== "CANCELLATION") return;
+  const [customer] = await supabaseRequest<Record<string, unknown>[]>(`/rest/v1/customers?id=eq.${payload.customerId}`, {
+    method: "PATCH",
+    prefer: "return=representation",
+    body: { status: "CANCELLED", cancelled_at: payload.occurredOn, cancellation_reason: payload.notes || null },
+  });
+  if (customer) await supabaseRequest("/rest/v1/audit_events", { method: "POST", body: { entity_type: "customer", entity_id: payload.customerId, action: "UPDATED", after_json: customer } });
+}
+
 export async function POST(request: Request) {
   const parsed = activitySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: parsed.error.issues[0].message }, { status: 400 });
@@ -47,6 +58,7 @@ export async function POST(request: Request) {
       method: "POST", prefer: "return=representation",
       body: { entity_type: "customer_activity", entity_id: payload.customerId, action: payload.type, after_json: payload },
     });
+    await syncCancellationOntoCustomer(payload);
     return Response.json({ event: { ...row.after_json, id: row.id, createdAt: row.created_at } }, { status: 201 });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Erro ao salvar acompanhamento." }, { status: 500 });
@@ -71,6 +83,7 @@ export async function PATCH(request: Request) {
       method: "PATCH", prefer: "return=representation",
       body: { entity_id: payload.customerId, action: payload.type, after_json: payload },
     });
+    await syncCancellationOntoCustomer(payload);
     return Response.json({ event: { ...row.after_json, id: row.id, createdAt: row.created_at } });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Erro ao editar registro." }, { status: 500 });

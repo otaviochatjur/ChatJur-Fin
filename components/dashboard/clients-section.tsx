@@ -25,17 +25,18 @@ const clientColumns: ColumnDef<"status" | "plan" | "mrr" | "actor" | "signedAt">
   { key: "signedAt", label: "Assinado em", defaultWidth: 130 },
 ];
 
-const statusLabels: Record<Customer["status"], string> = { ACTIVE: "Ativo", CANCELLED: "Cancelado", FROZEN: "Congelado" };
-const statusBadgeClass: Record<Customer["status"], string> = {
+type ConfirmedStatus = "ACTIVE" | "CANCELLED" | "FROZEN";
+const statusLabels: Record<ConfirmedStatus, string> = { ACTIVE: "Ativo", CANCELLED: "Cancelado", FROZEN: "Congelado" };
+const statusBadgeClass: Record<ConfirmedStatus, string> = {
   ACTIVE: "border-emerald-200 bg-emerald-50 text-emerald-700",
   CANCELLED: "border-red-200 bg-red-50 text-red-700",
   FROZEN: "border-amber-200 bg-amber-50 text-amber-700",
 };
-/** Subscription status can be null (operator hasn't manually confirmed it yet, e.g. right after the Set/2026 reset) — customers.status stays non-null. */
-function subscriptionStatusLabel(status: Subscription["status"]) {
+/** Both customers.status and subscriptions.status can be null (operator hasn't manually confirmed it yet, e.g. right after the Set/2026 reset) until the operator sets it or, for customers, a CANCELLATION activity auto-sets it. */
+function statusLabelOrUnset(status: ConfirmedStatus | null) {
   return status ? statusLabels[status] : "Sem status";
 }
-function subscriptionStatusBadgeClass(status: Subscription["status"]) {
+function statusBadgeClassOrUnset(status: ConfirmedStatus | null) {
   return status ? statusBadgeClass[status] : "border-slate-200 bg-slate-50 text-slate-500";
 }
 
@@ -125,7 +126,7 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     return customers.filter((customer) => {
-      if (statusFilter !== "all" && customer.status !== statusFilter) return false;
+      if (statusFilter === "UNSET" ? customer.status !== null : statusFilter !== "all" && customer.status !== statusFilter) return false;
       if (actorFilter !== "all" && customer.acquisition_actor_id !== actorFilter) return false;
       if (!term) return true;
       return [customer.office_name, customer.responsible_name, customer.email].some((field) => field?.toLowerCase().includes(term));
@@ -189,6 +190,7 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
             <SelectTrigger className="w-40"><SelectValue placeholder="Status" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todos os status</SelectItem>
+              <SelectItem value="UNSET">Sem status</SelectItem>
               <SelectItem value="ACTIVE">Ativo</SelectItem>
               <SelectItem value="CANCELLED">Cancelado</SelectItem>
               <SelectItem value="FROZEN">Congelado</SelectItem>
@@ -225,7 +227,7 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
                     <button className="font-medium text-left hover:underline" aria-haspopup="dialog" onClick={() => setSelectedId(customer.id)}>{customer.office_name}</button>
                     <p className="text-xs text-slate-500">{customer.responsible_name ?? customer.email ?? "—"}</p>
                   </TableCell>
-                  {columns.isVisible("status") && <TableCell><Badge variant="outline" className={statusBadgeClass[customer.status]}>{statusLabels[customer.status]}</Badge></TableCell>}
+                  {columns.isVisible("status") && <TableCell><Badge variant="outline" className={statusBadgeClassOrUnset(customer.status)}>{statusLabelOrUnset(customer.status)}</Badge></TableCell>}
                   {columns.isVisible("plan") && <TableCell className="text-sm text-slate-600"><span className="inline-flex items-center gap-1">{subscription?.plan_name_raw ?? "—"}{subscription && <CustomizationHint items={activeCustomizations(subscription.id, customer.id, events)} />}</span></TableCell>}
                   {columns.isVisible("mrr") && <TableCell className="text-right text-sm font-medium">{mrr > 0 ? money.format(mrr) : "—"}</TableCell>}
                   {columns.isVisible("actor") && <TableCell className="text-sm text-slate-600">{actorName(customer.acquisition_actor_id)}</TableCell>}
@@ -364,9 +366,10 @@ function ClientDetail({ customer, subscriptions, payments, implementationPayment
 
       <div className="space-y-3 rounded-xl border border-dashed border-slate-200 p-3">
         <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">Editar cadastro</p>
-        <Select value={status} onValueChange={(value) => setStatus(value as Customer["status"])}>
-          <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+        <Select value={status ?? "UNSET"} onValueChange={(value) => setStatus(value as ConfirmedStatus)}>
+          <SelectTrigger className="w-full"><SelectValue>{statusLabelOrUnset(status)}</SelectValue></SelectTrigger>
           <SelectContent>
+            {!status && <SelectItem value="UNSET" disabled>Sem status</SelectItem>}
             <SelectItem value="ACTIVE">Ativo</SelectItem>
             <SelectItem value="CANCELLED">Cancelado</SelectItem>
             <SelectItem value="FROZEN">Congelado</SelectItem>
@@ -413,7 +416,7 @@ function SubscriptionRow({ subscription, linkLabel, customizations, onChanged }:
       <div className="flex items-center justify-between gap-2">
         <span className="inline-flex items-center gap-1 font-medium">{subscription.plan_name_raw ?? "Plano"}<CustomizationHint items={customizations} /></span>
         <Select disabled={saving} value={subscription.status ?? "UNSET"} onValueChange={(value) => setStatus(value as "ACTIVE" | "FROZEN" | "CANCELLED")}>
-          <SelectTrigger className={"h-7 w-auto gap-1.5 border px-2 text-xs " + subscriptionStatusBadgeClass(subscription.status)}><SelectValue>{subscriptionStatusLabel(subscription.status)}</SelectValue></SelectTrigger>
+          <SelectTrigger className={"h-7 w-auto gap-1.5 border px-2 text-xs " + statusBadgeClassOrUnset(subscription.status)}><SelectValue>{statusLabelOrUnset(subscription.status)}</SelectValue></SelectTrigger>
           <SelectContent>
             {!subscription.status && <SelectItem value="UNSET" disabled>Sem status</SelectItem>}
             <SelectItem value="ACTIVE">Ativo</SelectItem>

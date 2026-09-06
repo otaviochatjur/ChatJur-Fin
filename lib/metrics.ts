@@ -127,7 +127,11 @@ export type Customer = {
   city: string | null;
   state: string | null;
   service_area: string | null;
-  status: "ACTIVE" | "CANCELLED" | "FROZEN";
+  // Nullable for the same reason as `Subscription.status`: reset to null for
+  // the operator to manually confirm going forward. Also auto-set to
+  // "CANCELLED" whenever a CANCELLATION customer-activity is logged — see
+  // `app/api/customer-activities/route.ts`.
+  status: "ACTIVE" | "CANCELLED" | "FROZEN" | null;
   onboarding_completed: boolean;
   source_channel: string | null;
   acquisition_actor_id: string | null;
