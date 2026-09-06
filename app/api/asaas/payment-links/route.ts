@@ -41,7 +41,15 @@ export async function GET(request: Request) {
     const actorId = new URL(request.url).searchParams.get("actorId");
     const filter = actorId ? `&actor_id=eq.${encodeURIComponent(actorId)}` : "";
     const links = await supabaseRequest<Record<string, unknown>[]>(`/rest/v1/payment_links?select=*&order=created_at.desc${filter}`);
-    return Response.json({ links: await attachRealStats(links) });
+    // active_subscribers/total_received are only read from the per-actor
+    // links tab (actor-workspace.tsx, which always passes actorId — a
+    // handful of links). The *unscoped* call (root dashboard load, "Planos
+    // e Links" screen: up to hundreds of links) used to pay for this too —
+    // attachRealStats scans practically the whole subscriptions/payments
+    // tables via `payment_link_id=in.(...ids)` — for numbers nobody reads
+    // there, adding real, measured latency (~800ms) to every full reload.
+    const withStats = actorId ? await attachRealStats(links) : links;
+    return Response.json({ links: withStats });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Erro ao consultar links." }, { status: 500 });
   }

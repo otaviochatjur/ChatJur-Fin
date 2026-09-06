@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link2Off } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -316,14 +316,35 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
     fetch("/api/plans?status=all").then((response) => response.json()).then((data) => setPlans(data.plans ?? [])).catch(() => setPlans([]));
   }, [links]);
 
-  const planById = new Map(plans.map((plan) => [plan.id, plan]));
+  // Kept in sync with the latest props/state on every render (not inside an
+  // effect — these need to be current *during* the render that follows a
+  // state change, not one tick later) so the callbacks below can read fresh
+  // data by id without needing `links`/`drafts` in their own dependency
+  // list. That's what lets those callbacks keep a *stable* identity across
+  // renders, which in turn is what lets `LinkRow` below be a real
+  // `React.memo` win: a stable callback prop + unchanged per-row primitives
+  // means React can skip re-rendering a row entirely — the whole point,
+  // since each row renders two <Select> (actor + plan), and this table can
+  // have 200+ rows.
+  const linksRef = useRef(links);
+  const draftsRef = useRef(drafts);
+  useEffect(() => {
+    linksRef.current = links;
+    draftsRef.current = drafts;
+  }, [links, drafts]);
+
+  const planById = useMemo(() => new Map(plans.map((plan) => [plan.id, plan])), [plans]);
   const term = search.trim().toLowerCase();
-  const filtered = links
-    .filter((link) => filter === "ALL" || link.status === filter)
-    .filter((link) => kindFilter === "ALL" || linkKind(link, planById) === kindFilter)
-    .filter((link) => actorFilter === "all" || link.actor_id === actorFilter)
-    .filter((link) => !term || link.display_name.toLowerCase().includes(term));
-  const pendingCount = links.filter((link) => link.status === "PENDING").length;
+  const filtered = useMemo(
+    () =>
+      links
+        .filter((link) => filter === "ALL" || link.status === filter)
+        .filter((link) => kindFilter === "ALL" || linkKind(link, planById) === kindFilter)
+        .filter((link) => actorFilter === "all" || link.actor_id === actorFilter)
+        .filter((link) => !term || link.display_name.toLowerCase().includes(term)),
+    [links, filter, kindFilter, actorFilter, term, planById],
+  );
+  const pendingCount = useMemo(() => links.filter((link) => link.status === "PENDING").length, [links]);
 
   function draftFor(link: PaymentLink): LinkDraft {
     return drafts[link.id] ?? {};
@@ -340,9 +361,9 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
     const draft = draftFor(link);
     return (draft.actorId !== undefined && draft.actorId !== link.actor_id) || (draft.planId !== undefined && draft.planId !== link.plan_id);
   }
-  function setDraft(link: PaymentLink, patch: LinkDraft) {
-    setDrafts((current) => ({ ...current, [link.id]: { ...current[link.id], ...patch } }));
-  }
+  const setDraft = useCallback((linkId: string, patch: LinkDraft) => {
+    setDrafts((current) => ({ ...current, [linkId]: { ...current[linkId], ...patch } }));
+  }, []);
   function clearDraft(id: string) {
     setDrafts((current) => {
       if (!(id in current)) return current;
@@ -352,10 +373,15 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
     });
   }
 
-  const dirtySelectedCount = [...selected].filter((id) => {
-    const link = links.find((l) => l.id === id);
-    return link && isDirty(link);
-  }).length;
+  const dirtySelectedCount = useMemo(
+    () =>
+      [...selected].filter((id) => {
+        const link = links.find((l) => l.id === id);
+        return link && isDirty(link);
+      }).length,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `isDirty` is a plain function recreated every render that only reads `drafts` (already listed); adding it here would just churn the memo on every render for no reason.
+    [selected, links, drafts],
+  );
 
   async function syncFromAsaas() {
     setSyncing(true);
@@ -392,9 +418,16 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
     return ` ${parts.join(" e ")} de clientes que já pagaram por este link foram atualizados retroativamente.`;
   }
 
-  async function confirmLink(link: PaymentLink) {
-    const draft = draftFor(link);
-    if (!isDirty(link)) return;
+  // Takes an id (not the link object) and reads current data off the refs
+  // above — that's what keeps this callback's identity stable across
+  // renders (see the refs' comment) so it can be passed straight into a
+  // memoized `LinkRow`.
+  const confirmLink = useCallback(async (linkId: string) => {
+    const link = linksRef.current.find((l) => l.id === linkId);
+    if (!link) return;
+    const draft = draftsRef.current[linkId] ?? {};
+    const isDirtyNow = (draft.actorId !== undefined && draft.actorId !== link.actor_id) || (draft.planId !== undefined && draft.planId !== link.plan_id);
+    if (!isDirtyNow) return;
     setConfirmingId(link.id);
     try {
       const backfilled = await applyBind(link, draft);
@@ -407,7 +440,7 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
     } finally {
       setConfirmingId(null);
     }
-  }
+  }, [onChanged]);
 
   async function confirmSelected() {
     const targets = [...selected].map((id) => links.find((l) => l.id === id)).filter((link): link is PaymentLink => !!link && isDirty(link));
@@ -439,13 +472,13 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
     }
   }
 
-  function toggleSelected(id: string, checked: boolean) {
+  const toggleSelected = useCallback((id: string, checked: boolean) => {
     setSelected((current) => {
       const next = new Set(current);
       if (checked) next.add(id); else next.delete(id);
       return next;
     });
-  }
+  }, []);
   const allFilteredSelected = filtered.length > 0 && filtered.every((link) => selected.has(link.id));
   function toggleSelectAll(checked: boolean) {
     setSelected((current) => {
@@ -456,7 +489,9 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
   }
 
   /** Deactivating actually disables the link at Asaas too (see the PATCH route) — the payer genuinely can't use it anymore, so it's worth a confirmation. Reactivating doesn't need one. */
-  async function toggleLinkStatus(link: PaymentLink) {
+  const toggleLinkStatus = useCallback(async (linkId: string) => {
+    const link = linksRef.current.find((l) => l.id === linkId);
+    if (!link) return;
     const nextStatus = link.status === "INACTIVE" ? "ACTIVE" : "INACTIVE";
     if (nextStatus === "INACTIVE" && !window.confirm(`Desativar "${link.display_name}"? Ele deixa de aceitar pagamentos no Asaas também.`)) return;
     setTogglingId(link.id);
@@ -473,7 +508,7 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
     } finally {
       setTogglingId(null);
     }
-  }
+  }, [onChanged]);
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.04)]">
@@ -531,51 +566,31 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
           {filtered.length === 0 && <TableRow><TableCell colSpan={columns.visibleCount + 3} className="text-center text-sm text-slate-500">Nenhum link nesse filtro.</TableCell></TableRow>}
           {filtered.map((link) => {
             const boundPlan = link.plan_id ? planById.get(link.plan_id) : undefined;
-            const kind = linkKind(link, planById);
-            const dirty = isDirty(link);
             return (
-            <TableRow key={link.id} className={dirty ? "bg-amber-50/60" : undefined}>
-              <TableCell><Checkbox checked={selected.has(link.id)} onCheckedChange={(checked) => toggleSelected(link.id, checked === true)} aria-label={`Selecionar ${link.display_name}`} /></TableCell>
-              <TableCell className="max-w-[240px] truncate font-medium" title={link.display_name}>
-                {link.display_name}
-              </TableCell>
-              {columns.isVisible("kind") && <TableCell><Badge variant="outline" className={planBadgeClass({ kind, code: boundPlan?.code ?? "" })}>{planKindLabels[kind]}</Badge></TableCell>}
-              {columns.isVisible("actor") && (
-                <TableCell>
-                  <Select value={draftActorId(link) ?? "none"} onValueChange={(value) => setDraft(link, { actorId: value === "none" ? null : value })}>
-                    <SelectTrigger className="w-44"><SelectValue placeholder="Sem ator" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Sem ator</SelectItem>
-                      {actors.map((actor) => <SelectItem key={actor.id} value={actor.id}>{actor.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </TableCell>
-              )}
-              {columns.isVisible("plan") && (
-                <TableCell>
-                  <Select value={draftPlanId(link) ?? "none"} onValueChange={(value) => setDraft(link, { planId: value === "none" ? null : value })}>
-                    <SelectTrigger className="w-44"><SelectValue placeholder="Sem plano" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Sem plano</SelectItem>
-                      {plans.map((plan) => <SelectItem key={plan.id} value={plan.id}>{plan.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </TableCell>
-              )}
-              {columns.isVisible("value") && <TableCell className="text-right text-sm">{money.format(link.value)}<span className="ml-1 text-xs text-slate-400">{link.billing_period === "ANNUAL" ? "/ano" : link.billing_period === "ONE_TIME" ? " · taxa única" : "/mês"}</span></TableCell>}
-              {columns.isVisible("source") && <TableCell className="text-xs text-slate-500">{link.source === "ASAAS_SYNC" ? "Importado do Asaas" : "Gerado aqui"}</TableCell>}
-              {columns.isVisible("status") && <TableCell><StatusBadge status={link.status} /></TableCell>}
-              <TableCell className="flex justify-end gap-1.5">
-                {dirty && (
-                  <Button size="sm" disabled={confirmingId === link.id} onClick={() => confirmLink(link)} className="bg-[#3a5d9d] text-white hover:bg-[#2c4a80]">
-                    {confirmingId === link.id ? "Vinculando…" : "Vincular"}
-                  </Button>
-                )}
-                <Button variant="ghost" size="sm" disabled={togglingId === link.id} onClick={() => toggleLinkStatus(link)} className={link.status === "INACTIVE" ? "text-emerald-700 hover:text-emerald-800" : "text-red-600 hover:text-red-700"}>
-                  {togglingId === link.id ? "…" : link.status === "INACTIVE" ? "Reativar" : "Desativar"}
-                </Button>
-              </TableCell>
-            </TableRow>
+              <LinkRow
+                key={link.id}
+                link={link}
+                kind={linkKind(link, planById)}
+                boundPlanCode={boundPlan?.code ?? ""}
+                dirty={isDirty(link)}
+                selected={selected.has(link.id)}
+                draftActorId={draftActorId(link)}
+                draftPlanId={draftPlanId(link)}
+                showKind={columns.isVisible("kind")}
+                showActor={columns.isVisible("actor")}
+                showPlan={columns.isVisible("plan")}
+                showValue={columns.isVisible("value")}
+                showSource={columns.isVisible("source")}
+                showStatus={columns.isVisible("status")}
+                actors={actors}
+                plans={plans}
+                confirming={confirmingId === link.id}
+                toggling={togglingId === link.id}
+                onToggleSelected={toggleSelected}
+                onSetDraft={setDraft}
+                onConfirm={confirmLink}
+                onToggleStatus={toggleLinkStatus}
+              />
             );
           })}
         </TableBody>
@@ -583,3 +598,104 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
     </section>
   );
 }
+
+/**
+ * One payment-link row, `React.memo`-wrapped: this table can have 200+ rows
+ * and each renders two <Select> (actor + plan), which was the single
+ * biggest render/DOM cost on this screen. Every prop here is either a
+ * primitive, a stable callback (see the refs comment in `LinksPanel`), or
+ * an array that only changes identity when the underlying data actually
+ * changes (`actors`, `plans`) — so typing in the search box, resizing a
+ * column, or (de)selecting a *different* row's checkbox no longer
+ * re-renders every row, only the ones whose own props actually changed.
+ */
+const LinkRow = memo(function LinkRow({
+  link,
+  kind,
+  boundPlanCode,
+  dirty,
+  selected,
+  draftActorId,
+  draftPlanId,
+  showKind,
+  showActor,
+  showPlan,
+  showValue,
+  showSource,
+  showStatus,
+  actors,
+  plans,
+  confirming,
+  toggling,
+  onToggleSelected,
+  onSetDraft,
+  onConfirm,
+  onToggleStatus,
+}: {
+  link: PaymentLink;
+  kind: Plan["kind"];
+  boundPlanCode: string;
+  dirty: boolean;
+  selected: boolean;
+  draftActorId: string | null;
+  draftPlanId: string | null;
+  showKind: boolean;
+  showActor: boolean;
+  showPlan: boolean;
+  showValue: boolean;
+  showSource: boolean;
+  showStatus: boolean;
+  actors: CommercialActor[];
+  plans: Plan[];
+  confirming: boolean;
+  toggling: boolean;
+  onToggleSelected: (id: string, checked: boolean) => void;
+  onSetDraft: (id: string, patch: LinkDraft) => void;
+  onConfirm: (id: string) => void;
+  onToggleStatus: (id: string) => void;
+}) {
+  return (
+    <TableRow className={dirty ? "bg-amber-50/60" : undefined}>
+      <TableCell><Checkbox checked={selected} onCheckedChange={(checked) => onToggleSelected(link.id, checked === true)} aria-label={`Selecionar ${link.display_name}`} /></TableCell>
+      <TableCell className="max-w-[240px] truncate font-medium" title={link.display_name}>
+        {link.display_name}
+      </TableCell>
+      {showKind && <TableCell><Badge variant="outline" className={planBadgeClass({ kind, code: boundPlanCode })}>{planKindLabels[kind]}</Badge></TableCell>}
+      {showActor && (
+        <TableCell>
+          <Select value={draftActorId ?? "none"} onValueChange={(value) => onSetDraft(link.id, { actorId: value === "none" ? null : value })}>
+            <SelectTrigger className="w-44"><SelectValue placeholder="Sem ator" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">Sem ator</SelectItem>
+              {actors.map((actor) => <SelectItem key={actor.id} value={actor.id}>{actor.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </TableCell>
+      )}
+      {showPlan && (
+        <TableCell>
+          <Select value={draftPlanId ?? "none"} onValueChange={(value) => onSetDraft(link.id, { planId: value === "none" ? null : value })}>
+            <SelectTrigger className="w-44"><SelectValue placeholder="Sem plano" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">Sem plano</SelectItem>
+              {plans.map((plan) => <SelectItem key={plan.id} value={plan.id}>{plan.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </TableCell>
+      )}
+      {showValue && <TableCell className="text-right text-sm">{money.format(link.value)}<span className="ml-1 text-xs text-slate-400">{link.billing_period === "ANNUAL" ? "/ano" : link.billing_period === "ONE_TIME" ? " · taxa única" : "/mês"}</span></TableCell>}
+      {showSource && <TableCell className="text-xs text-slate-500">{link.source === "ASAAS_SYNC" ? "Importado do Asaas" : "Gerado aqui"}</TableCell>}
+      {showStatus && <TableCell><StatusBadge status={link.status} /></TableCell>}
+      <TableCell className="flex justify-end gap-1.5">
+        {dirty && (
+          <Button size="sm" disabled={confirming} onClick={() => onConfirm(link.id)} className="bg-[#3a5d9d] text-white hover:bg-[#2c4a80]">
+            {confirming ? "Vinculando…" : "Vincular"}
+          </Button>
+        )}
+        <Button variant="ghost" size="sm" disabled={toggling} onClick={() => onToggleStatus(link.id)} className={link.status === "INACTIVE" ? "text-emerald-700 hover:text-emerald-800" : "text-red-600 hover:text-red-700"}>
+          {toggling ? "…" : link.status === "INACTIVE" ? "Reativar" : "Desativar"}
+        </Button>
+      </TableCell>
+    </TableRow>
+  );
+});

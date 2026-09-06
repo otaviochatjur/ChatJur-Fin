@@ -113,7 +113,8 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
     loadLastSync();
   }, []);
 
-  const actorName = (id: string | null) => actors.find((actor) => actor.id === id)?.name ?? "Orgânico / sem parceiro";
+  const actorById = useMemo(() => new Map(actors.map((actor) => [actor.id, actor])), [actors]);
+  const actorName = (id: string | null) => (id ? actorById.get(id)?.name : undefined) ?? "Orgânico / sem parceiro";
 
   const activeSubscriptionByCustomer = useMemo(() => {
     const map = new Map<string, Subscription>();
@@ -123,6 +124,19 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
     }
     return map;
   }, [subscriptions]);
+
+  // `activeCustomizations` scans the *entire* `events` array — fine for one
+  // subscription, but the clients table calls it once per *visible row*
+  // (hundreds), so doing that inline in JSX meant redoing that full scan,
+  // for every row, on every render (every keystroke in search, every column
+  // resize...). Precomputed once per actual data change instead.
+  const customizationsByCustomer = useMemo(() => {
+    const map = new Map<string, ActiveCustomization[]>();
+    for (const [customerId, subscription] of activeSubscriptionByCustomer) {
+      map.set(customerId, activeCustomizations(subscription.id, customerId, events));
+    }
+    return map;
+  }, [activeSubscriptionByCustomer, events]);
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -229,7 +243,7 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
                     <p className="text-xs text-slate-500">{customer.responsible_name ?? customer.email ?? "—"}</p>
                   </TableCell>
                   {columns.isVisible("status") && <TableCell><Badge variant="outline" className={statusBadgeClassOrUnset(customer.status)}>{statusLabelOrUnset(customer.status)}</Badge></TableCell>}
-                  {columns.isVisible("plan") && <TableCell className="text-sm text-slate-600"><span className="inline-flex items-center gap-1">{subscription?.plan_name_raw ?? "—"}{subscription && <CustomizationHint items={activeCustomizations(subscription.id, customer.id, events)} />}</span></TableCell>}
+                  {columns.isVisible("plan") && <TableCell className="text-sm text-slate-600"><span className="inline-flex items-center gap-1">{subscription?.plan_name_raw ?? "—"}{subscription && <CustomizationHint items={customizationsByCustomer.get(customer.id) ?? []} />}</span></TableCell>}
                   {columns.isVisible("mrr") && <TableCell className="text-right text-sm font-medium">{mrr > 0 ? money.format(mrr) : "—"}</TableCell>}
                   {columns.isVisible("actor") && <TableCell className="text-sm text-slate-600">{actorName(customer.acquisition_actor_id)}</TableCell>}
                   {columns.isVisible("signedAt") && <TableCell className="text-sm text-slate-500">{fmtDate(customer.signed_at)}</TableCell>}

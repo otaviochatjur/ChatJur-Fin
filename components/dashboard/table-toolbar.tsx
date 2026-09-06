@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Columns3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -89,6 +89,7 @@ const DEFAULT_COLUMN_WIDTH = 160;
  */
 export function useColumnWidths<K extends string = string>(defs: readonly ColumnDef<K>[] = []) {
   const [widths, setWidths] = useState<Record<string, number>>({});
+  const rafRef = useRef<number | null>(null);
 
   function getWidth(key: string, fallback?: number) {
     return widths[key] ?? defs.find((def) => def.key === key)?.defaultWidth ?? fallback ?? DEFAULT_COLUMN_WIDTH;
@@ -102,15 +103,36 @@ export function useColumnWidths<K extends string = string>(defs: readonly Column
       event.stopPropagation();
       const startX = event.clientX;
       const startWidth = getWidth(key, fallback);
+      // `mousemove` can fire dozens of times per second; calling `setWidths`
+      // straight from it re-renders the *whole* table (every row, every
+      // per-row <Select>) on every single one of those events, which is
+      // what made dragging a column border feel laggy on the bigger tables
+      // (241 links × 2 <Select> each, 747 clients...). Coalescing into at
+      // most one state update per animation frame — via a ref instead of
+      // more state, so the coalescing itself doesn't trigger renders — caps
+      // the re-render rate to the screen's refresh rate instead of the
+      // mouse's event rate, without changing the resize behavior itself
+      // (the column still tracks the cursor 1:1, just resampled to ~60fps).
+      let pendingWidth = startWidth;
       function onMove(moveEvent: MouseEvent) {
-        const next = Math.max(MIN_COLUMN_WIDTH, startWidth + (moveEvent.clientX - startX));
-        setWidths((current) => ({ ...current, [key]: next }));
+        pendingWidth = Math.max(MIN_COLUMN_WIDTH, startWidth + (moveEvent.clientX - startX));
+        if (rafRef.current !== null) return;
+        rafRef.current = requestAnimationFrame(() => {
+          rafRef.current = null;
+          setWidths((current) => (current[key] === pendingWidth ? current : { ...current, [key]: pendingWidth }));
+        });
       }
       function onUp() {
         window.removeEventListener("mousemove", onMove);
         window.removeEventListener("mouseup", onUp);
         document.body.style.cursor = "";
         document.body.style.userSelect = "";
+        if (rafRef.current !== null) {
+          cancelAnimationFrame(rafRef.current);
+          rafRef.current = null;
+        }
+        // Final snap, in case the last mousemove's frame got cancelled above.
+        setWidths((current) => (current[key] === pendingWidth ? current : { ...current, [key]: pendingWidth }));
       }
       document.body.style.cursor = "col-resize";
       document.body.style.userSelect = "none";
