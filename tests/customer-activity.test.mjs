@@ -124,6 +124,35 @@ test("validates item quantities, options and exact totals for upsells and downse
   assert.equal(activitySchema.safeParse({ ...valid, type: "RENEWAL", items, amount: 280 }).success, false);
 });
 
+test("activeCustomizations nets upsells and downsells per item kind, dropping fully-undone ones", async () => {
+  const { activeCustomizations } = await vite.ssrLoadModule("/lib/customer-activity.ts");
+  const subId = "00000000-0000-4000-8000-000000000007";
+  const firstUpsell = { ...valid, subscriptionId: subId, id: "u1", createdAt: "2026-09-01T00:00:00Z", type: "UPSELL", occurredOn: "2026-09-01", amount: 50, items: [{ kind: "USERS", quantity: 5, amount: 50 }] };
+  const secondUpsell = { ...valid, subscriptionId: subId, id: "u2", createdAt: "2026-09-10T00:00:00Z", type: "UPSELL", occurredOn: "2026-09-10", amount: 100, items: [{ kind: "USERS", quantity: 10, amount: 100 }] };
+  const toggleOn = { ...valid, subscriptionId: subId, id: "u3", createdAt: "2026-09-05T00:00:00Z", type: "UPSELL", occurredOn: "2026-09-05", amount: 30, items: [{ kind: "OPEN_API", quantity: null, amount: 30 }] };
+  const toggleOff = { ...valid, subscriptionId: subId, id: "d1", createdAt: "2026-09-12T00:00:00Z", type: "DOWNSELL", occurredOn: "2026-09-12", amount: 30, items: [{ kind: "OPEN_API", quantity: null, amount: 30 }] };
+
+  // Before any event: no customizations.
+  assert.deepEqual(activeCustomizations(subId, valid.customerId, [firstUpsell], "2026-08-31"), []);
+
+  // Two upsells on the same kind accumulate rather than replace.
+  const afterBoth = activeCustomizations(subId, valid.customerId, [firstUpsell, secondUpsell], "2026-09-10");
+  assert.deepEqual(afterBoth, [{ kind: "USERS", quantity: 15, amount: 150 }]);
+
+  // A toggle item (null quantity) later fully removed by a downsell nets to zero and disappears.
+  const withToggle = activeCustomizations(subId, valid.customerId, [firstUpsell, toggleOn], "2026-09-05");
+  assert.deepEqual(withToggle.sort((a, b) => a.kind.localeCompare(b.kind)), [{ kind: "OPEN_API", quantity: null, amount: 30 }, { kind: "USERS", quantity: 5, amount: 50 }]);
+  const afterToggleOff = activeCustomizations(subId, valid.customerId, [firstUpsell, toggleOn, toggleOff], "2026-09-12");
+  assert.deepEqual(afterToggleOff, [{ kind: "USERS", quantity: 5, amount: 50 }]);
+
+  // A fully offsetting upsell/downsell pair on the same kind nets to nothing.
+  const netZero = { ...valid, subscriptionId: subId, id: "d2", createdAt: "2026-09-15T00:00:00Z", type: "DOWNSELL", occurredOn: "2026-09-15", amount: 150, items: [{ kind: "USERS", quantity: 15, amount: 150 }] };
+  assert.deepEqual(activeCustomizations(subId, valid.customerId, [firstUpsell, secondUpsell, netZero], "2026-09-15"), []);
+
+  // Different subscription or customer is ignored.
+  assert.deepEqual(activeCustomizations("00000000-0000-4000-8000-000000000099", valid.customerId, [firstUpsell], "2026-09-10"), []);
+});
+
 test("counts combined plan and cycle changes once financially and applies them on the effective date", async () => {
   const { effectiveSubscriptions, planMrrDelta } = await vite.ssrLoadModule("/lib/customer-activity.ts");
   const planSubscriptionId = "00000000-0000-4000-8000-000000000002";

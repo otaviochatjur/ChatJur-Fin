@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { CustomerTimeline } from "@/components/dashboard/customer-timeline";
-import type { CustomerActivity } from "@/lib/customer-activity";
-import { Search } from "lucide-react";
+import { activeCustomizations, itemCatalog, type ActiveCustomization, type CustomerActivity } from "@/lib/customer-activity";
+import { Search, SlidersHorizontal } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ColumnVisibilityMenu, ResizableTh, useColumnVisibility, useColumnWidths, type ColumnDef } from "@/components/dashboard/table-toolbar";
 import { isPaidStatus, money, monthlyValue, roleLabels, type CommercialActor, type Customer, type ImplementationPayment, type Payment, type PaymentLink, type Subscription } from "@/lib/metrics";
 import { localDate } from "@/lib/customer-activity";
@@ -36,6 +37,32 @@ function subscriptionStatusLabel(status: Subscription["status"]) {
 }
 function subscriptionStatusBadgeClass(status: Subscription["status"]) {
   return status ? statusBadgeClass[status] : "border-slate-200 bg-slate-50 text-slate-500";
+}
+
+function formatCustomization(item: ActiveCustomization) {
+  const label = itemCatalog[item.kind].label;
+  const qty = item.quantity !== null ? `${item.quantity > 0 ? "+" : ""}${item.quantity} ` : "";
+  return `${qty}${label} · ${money.format(item.amount)}/mês`;
+}
+
+/** Subtle hover indicator for a plan that has add-ons on top of its base value (see `activeCustomizations`) — kept out of the way unless there's actually something to show. */
+function CustomizationHint({ items }: { items: ActiveCustomization[] }) {
+  if (!items.length) return null;
+  return (
+    <TooltipProvider delayDuration={150}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span tabIndex={0} onClick={(event) => event.stopPropagation()} className="inline-flex shrink-0 cursor-help items-center rounded-full p-0.5 text-[#3b82f6] outline-none hover:bg-blue-50 focus-visible:bg-blue-50" aria-label="Plano personalizado em relação ao base">
+            <SlidersHorizontal className="size-3.5" />
+          </span>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-64">
+          <p className="font-medium">Personalizado em relação ao plano base</p>
+          <ul className="mt-1 space-y-0.5 text-[11px]">{items.map((item) => <li key={item.kind}>{formatCustomization(item)}</li>)}</ul>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
 }
 
 function fmtDate(value: string | null) {
@@ -199,7 +226,7 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
                     <p className="text-xs text-slate-500">{customer.responsible_name ?? customer.email ?? "—"}</p>
                   </TableCell>
                   {columns.isVisible("status") && <TableCell><Badge variant="outline" className={statusBadgeClass[customer.status]}>{statusLabels[customer.status]}</Badge></TableCell>}
-                  {columns.isVisible("plan") && <TableCell className="text-sm text-slate-600">{subscription?.plan_name_raw ?? "—"}</TableCell>}
+                  {columns.isVisible("plan") && <TableCell className="text-sm text-slate-600"><span className="inline-flex items-center gap-1">{subscription?.plan_name_raw ?? "—"}{subscription && <CustomizationHint items={activeCustomizations(subscription.id, customer.id, events)} />}</span></TableCell>}
                   {columns.isVisible("mrr") && <TableCell className="text-right text-sm font-medium">{mrr > 0 ? money.format(mrr) : "—"}</TableCell>}
                   {columns.isVisible("actor") && <TableCell className="text-sm text-slate-600">{actorName(customer.acquisition_actor_id)}</TableCell>}
                   {columns.isVisible("signedAt") && <TableCell className="text-sm text-slate-500">{fmtDate(customer.signed_at)}</TableCell>}
@@ -300,7 +327,7 @@ function ClientDetail({ customer, subscriptions, payments, implementationPayment
         {subscriptions.length === 0 && !addingPlan && <p className="text-sm text-slate-500">Nenhuma assinatura registrada. Se este cliente é cobrado fora do Asaas (ex: veio da planilha e ainda não pagou por link), cadastre o plano manualmente para que ele entre no MRR.</p>}
         {addingPlan && <ManualSubscriptionForm customerId={customer.id} onDone={() => { setAddingPlan(false); onChanged(); }} onCancel={() => setAddingPlan(false)} />}
         {subscriptions.map((subscription) => (
-          <SubscriptionRow key={subscription.id} subscription={subscription} linkLabel={linkLabel(subscription.payment_link_id)} onChanged={onChanged} />
+          <SubscriptionRow key={subscription.id} subscription={subscription} linkLabel={linkLabel(subscription.payment_link_id)} customizations={activeCustomizations(subscription.id, customer.id, events)} onChanged={onChanged} />
         ))}
       </div>
 
@@ -366,7 +393,7 @@ function ClientDetail({ customer, subscriptions, payments, implementationPayment
 }
 
 /** One subscription card with an inline, auto-saving status editor — lets the operator manually confirm ACTIVE/FROZEN/CANCELLED for subscriptions that came out of the Set/2026 reset with no status at all. */
-function SubscriptionRow({ subscription, linkLabel, onChanged }: { subscription: Subscription; linkLabel: string | null; onChanged: () => void }) {
+function SubscriptionRow({ subscription, linkLabel, customizations, onChanged }: { subscription: Subscription; linkLabel: string | null; customizations: ActiveCustomization[]; onChanged: () => void }) {
   const [saving, setSaving] = useState(false);
   async function setStatus(status: "ACTIVE" | "FROZEN" | "CANCELLED") {
     if (saving || status === subscription.status) return;
@@ -384,7 +411,7 @@ function SubscriptionRow({ subscription, linkLabel, onChanged }: { subscription:
   return (
     <div className="rounded-lg border border-slate-100 p-2.5 text-sm">
       <div className="flex items-center justify-between gap-2">
-        <span className="font-medium">{subscription.plan_name_raw ?? "Plano"}</span>
+        <span className="inline-flex items-center gap-1 font-medium">{subscription.plan_name_raw ?? "Plano"}<CustomizationHint items={customizations} /></span>
         <Select disabled={saving} value={subscription.status ?? "UNSET"} onValueChange={(value) => setStatus(value as "ACTIVE" | "FROZEN" | "CANCELLED")}>
           <SelectTrigger className={"h-7 w-auto gap-1.5 border px-2 text-xs " + subscriptionStatusBadgeClass(subscription.status)}><SelectValue>{subscriptionStatusLabel(subscription.status)}</SelectValue></SelectTrigger>
           <SelectContent>

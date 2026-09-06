@@ -93,6 +93,39 @@ export function itemizedMrrDelta(event: Pick<CustomerActivity, "type" | "amount"
   return 0;
 }
 
+export type ActiveCustomization = { kind: ActivityItem["kind"]; quantity: number | null; amount: number };
+
+/**
+ * Net add-ons still in effect for one subscription as of `on`: sums every
+ * UPSELL (+) and DOWNSELL (-) item by kind, so e.g. "+5 usuários" followed
+ * later by "-5 usuários" nets to nothing (not shown), while "+5" then
+ * "+10" nets to "+15" (one combined entry). Used to flag a subscription as
+ * "personalizado" relative to its base plan — see `hasCustomizations`.
+ */
+export function activeCustomizations(subscriptionId: string, customerId: string, events: CustomerActivity[], on = localDate()): ActiveCustomization[] {
+  const totals = new Map<ActivityItem["kind"], { quantity: number; amount: number; hasQuantity: boolean }>();
+  for (const event of events) {
+    if (event.occurredOn > on || event.subscriptionId !== subscriptionId || event.customerId !== customerId) continue;
+    if (event.type !== "UPSELL" && event.type !== "DOWNSELL") continue;
+    const sign = event.type === "UPSELL" ? 1 : -1;
+    for (const item of event.items ?? []) {
+      const current = totals.get(item.kind) ?? { quantity: 0, amount: 0, hasQuantity: item.quantity !== null };
+      current.quantity += sign * (item.quantity ?? 0);
+      current.amount += sign * item.amount;
+      if (item.quantity !== null) current.hasQuantity = true;
+      totals.set(item.kind, current);
+    }
+  }
+  const result: ActiveCustomization[] = [];
+  for (const [kind, totalForKind] of totals) {
+    const amount = Math.round(totalForKind.amount * 100) / 100;
+    const quantity = totalForKind.hasQuantity ? totalForKind.quantity : null;
+    if (Math.abs(amount) < 0.005 && (quantity === null || quantity === 0)) continue; // fully undone by a later downsell — no longer a customization
+    result.push({ kind, quantity, amount });
+  }
+  return result;
+}
+
 export function effectiveSubscriptions(subscriptions: Subscription[], events: CustomerActivity[], on = localDate()) {
   const due = events.filter(e => e.occurredOn <= on);
   const planEvents = due.filter(e => e.planChange).sort((a, b) => a.occurredOn.localeCompare(b.occurredOn) || a.createdAt.localeCompare(b.createdAt));
