@@ -31,7 +31,11 @@ async function fetchAll(path) {
 
 const customers = await fetchAll("/rest/v1/customers?select=id,office_name,responsible_name,email,status,external_office_id");
 const subscriptions = await fetchAll("/rest/v1/subscriptions?select=id,customer_id,billing_period,value,status,plan_name_raw,started_at,source,payment_link_id");
-const payments = await fetchAll("/rest/v1/payments?select=subscription_id,customer_id,value,due_date,payment_date,status&order=due_date.asc");
+// Tiebreak by id: `order=due_date.asc` alone is not a unique sort key, and combined
+// with offset pagination that lets PostgREST return rows in a slightly different
+// order between requests — rows tied on due_date can end up duplicated on one page
+// and skipped on the next, silently corrupting per-subscription payment counts.
+const payments = await fetchAll("/rest/v1/payments?select=subscription_id,customer_id,value,due_date,payment_date,status&order=due_date.asc,id.asc");
 
 console.error(`customers=${customers.length} subscriptions=${subscriptions.length} payments=${payments.length}`);
 
