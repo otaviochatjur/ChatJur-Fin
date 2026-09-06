@@ -9,8 +9,9 @@ const OVERLAP_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
 
 type LastRun = { action: "COMPLETED" | "FAILED"; after_json: { startedAt?: string } | null };
 
-/** Watermark = the `startedAt` of the last successful full-account sync, so an incremental run only walks what's new since then. Read from `audit_events` (see `logSyncRun`) rather than a dedicated column — one global cursor, not per-link. */
-async function resolveSince(): Promise<string | undefined> {
+/** Watermark = the `startedAt` of the last successful full-account sync, so an incremental run only walks what's new since then. Read from `audit_events` (see `logSyncRun`) rather than a dedicated column — one global cursor, not per-link. Pass `fullRescan: true` in the request body to ignore it and re-walk the entire account (e.g. after a sync-logic change that could affect old payments, like the orphan-subscription fix — an incremental run alone would never revisit them). */
+async function resolveSince(fullRescan: boolean): Promise<string | undefined> {
+  if (fullRescan) return undefined;
   const rows = await supabaseRequest<LastRun[]>(
     "/rest/v1/audit_events?select=action,after_json&entity_type=eq.payment_sync&action=eq.COMPLETED&order=created_at.desc&limit=1",
   );
@@ -52,7 +53,7 @@ async function logSyncRun(scope: string, status: "COMPLETED" | "FAILED", details
  */
 export async function POST(request: Request) {
   const startedAt = new Date().toISOString();
-  const payload = await request.json().catch(() => ({})) as { actorId?: string; linkId?: string };
+  const payload = await request.json().catch(() => ({})) as { actorId?: string; linkId?: string; fullRescan?: boolean };
   const scope = payload.linkId ? `link:${payload.linkId}` : payload.actorId ? `actor:${payload.actorId}` : "all";
   try {
     let allowedAsaasLinkIds: Set<string> | null = null;
@@ -67,7 +68,7 @@ export async function POST(request: Request) {
       allowedAsaasLinkIds = new Set(rows.map((row) => row.asaas_payment_link_id));
     }
 
-    const since = await resolveSince();
+    const since = await resolveSince(payload.fullRescan === true);
     let offset = 0;
     let synced = 0;
     let skipped = 0;
