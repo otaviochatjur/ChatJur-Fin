@@ -30,6 +30,13 @@ const statusBadgeClass: Record<Customer["status"], string> = {
   CANCELLED: "border-red-200 bg-red-50 text-red-700",
   FROZEN: "border-amber-200 bg-amber-50 text-amber-700",
 };
+/** Subscription status can be null (operator hasn't manually confirmed it yet, e.g. right after the Set/2026 reset) — customers.status stays non-null. */
+function subscriptionStatusLabel(status: Subscription["status"]) {
+  return status ? statusLabels[status] : "Sem status";
+}
+function subscriptionStatusBadgeClass(status: Subscription["status"]) {
+  return status ? statusBadgeClass[status] : "border-slate-200 bg-slate-50 text-slate-500";
+}
 
 function fmtDate(value: string | null) {
   return value ? new Date(value).toLocaleDateString("pt-BR") : "—";
@@ -293,18 +300,7 @@ function ClientDetail({ customer, subscriptions, payments, implementationPayment
         {subscriptions.length === 0 && !addingPlan && <p className="text-sm text-slate-500">Nenhuma assinatura registrada. Se este cliente é cobrado fora do Asaas (ex: veio da planilha e ainda não pagou por link), cadastre o plano manualmente para que ele entre no MRR.</p>}
         {addingPlan && <ManualSubscriptionForm customerId={customer.id} onDone={() => { setAddingPlan(false); onChanged(); }} onCancel={() => setAddingPlan(false)} />}
         {subscriptions.map((subscription) => (
-          <div key={subscription.id} className="rounded-lg border border-slate-100 p-2.5 text-sm">
-            <div className="flex items-center justify-between gap-2">
-              <span className="font-medium">{subscription.plan_name_raw ?? "Plano"}</span>
-              <Badge variant="outline" className={statusBadgeClass[subscription.status]}>{statusLabels[subscription.status]}</Badge>
-            </div>
-            <p className="text-xs text-slate-500">{subscription.billing_period === "ANNUAL" ? "Anual" : "Mensal"} · {money.format(subscription.value)}{subscription.source === "LEGACY_IMPORT" ? " · importado" : subscription.source === "MANUAL" ? " · cadastrado manualmente" : ""}</p>
-            {linkLabel(subscription.payment_link_id) ? (
-              <p className="mt-1 text-xs font-medium text-[#3b82f6]">Pago via link: {linkLabel(subscription.payment_link_id)}</p>
-            ) : (
-              <p className="mt-1 text-xs text-slate-400">{subscription.source === "MANUAL" ? "Sem link de pagamento (cadastro manual)" : "Sem link de pagamento rastreado (venda direta/legado)"}</p>
-            )}
-          </div>
+          <SubscriptionRow key={subscription.id} subscription={subscription} linkLabel={linkLabel(subscription.payment_link_id)} onChanged={onChanged} />
         ))}
       </div>
 
@@ -365,6 +361,46 @@ function ClientDetail({ customer, subscriptions, payments, implementationPayment
         <Textarea placeholder="Comentários internos (CS)" value={comments} onChange={(event) => setComments(event.target.value)} />
         <Button className="w-full bg-[#3a5d9d] text-white hover:bg-[#2c4a80]" disabled={saving} onClick={save}>{saving ? "Salvando…" : "Salvar alterações"}</Button>
       </div>
+    </div>
+  );
+}
+
+/** One subscription card with an inline, auto-saving status editor — lets the operator manually confirm ACTIVE/FROZEN/CANCELLED for subscriptions that came out of the Set/2026 reset with no status at all. */
+function SubscriptionRow({ subscription, linkLabel, onChanged }: { subscription: Subscription; linkLabel: string | null; onChanged: () => void }) {
+  const [saving, setSaving] = useState(false);
+  async function setStatus(status: "ACTIVE" | "FROZEN" | "CANCELLED") {
+    if (saving || status === subscription.status) return;
+    setSaving(true);
+    try {
+      const response = await fetch("/api/subscriptions", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: subscription.id, status }) });
+      const data = await response.json();
+      if (!response.ok) { toast.error(data.error ?? "Não foi possível atualizar o status."); return; }
+      toast.success("Status da assinatura atualizado.");
+      onChanged();
+    } finally {
+      setSaving(false);
+    }
+  }
+  return (
+    <div className="rounded-lg border border-slate-100 p-2.5 text-sm">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-medium">{subscription.plan_name_raw ?? "Plano"}</span>
+        <Select disabled={saving} value={subscription.status ?? "UNSET"} onValueChange={(value) => setStatus(value as "ACTIVE" | "FROZEN" | "CANCELLED")}>
+          <SelectTrigger className={"h-7 w-auto gap-1.5 border px-2 text-xs " + subscriptionStatusBadgeClass(subscription.status)}><SelectValue>{subscriptionStatusLabel(subscription.status)}</SelectValue></SelectTrigger>
+          <SelectContent>
+            {!subscription.status && <SelectItem value="UNSET" disabled>Sem status</SelectItem>}
+            <SelectItem value="ACTIVE">Ativo</SelectItem>
+            <SelectItem value="FROZEN">Congelado</SelectItem>
+            <SelectItem value="CANCELLED">Cancelado</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <p className="text-xs text-slate-500">{subscription.billing_period === "ANNUAL" ? "Anual" : "Mensal"} · {money.format(subscription.value)}{subscription.source === "LEGACY_IMPORT" ? " · importado" : subscription.source === "MANUAL" ? " · cadastrado manualmente" : ""}</p>
+      {linkLabel ? (
+        <p className="mt-1 text-xs font-medium text-[#3b82f6]">Pago via link: {linkLabel}</p>
+      ) : (
+        <p className="mt-1 text-xs text-slate-400">{subscription.source === "MANUAL" ? "Sem link de pagamento (cadastro manual)" : "Sem link de pagamento rastreado (venda direta/legado)"}</p>
+      )}
     </div>
   );
 }

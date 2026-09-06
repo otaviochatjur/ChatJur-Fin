@@ -155,7 +155,12 @@ export type Subscription = {
   value: number;
   payment_method: string | null;
   installments: number | null;
-  status: "ACTIVE" | "CANCELLED" | "FROZEN";
+  // Nullable on purpose: after the operator-driven reset (Sep/2026) every
+  // subscription starts with no status until manually confirmed, instead of
+  // inheriting a possibly-stale ACTIVE/FROZEN/CANCELLED from before the
+  // switch to manual operation. Sync (`lib/payment-sync.ts`) still sets it
+  // to ACTIVE automatically whenever a real paid payment lands.
+  status: "ACTIVE" | "CANCELLED" | "FROZEN" | null;
   asaas_subscription_id: string | null;
   asaas_installment_id: string | null;
   started_at: string | null;

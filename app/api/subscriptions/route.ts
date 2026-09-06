@@ -63,3 +63,24 @@ export async function POST(request: Request) {
     return Response.json({ error: error instanceof Error ? error.message : "Erro ao cadastrar assinatura." }, { status: 500 });
   }
 }
+
+/**
+ * Lets the operator manually confirm a subscription's status — mainly for
+ * the ones that came out of the Set/2026 reset with `status: null` (see
+ * `lib/metrics.ts`). Automated sync (`lib/payment-sync.ts`) still sets
+ * ACTIVE on its own whenever a real paid payment lands; this is only for
+ * the operator-driven cases (FROZEN, CANCELLED, or confirming ACTIVE by hand).
+ */
+export async function PATCH(request: Request) {
+  try {
+    const payload = (await request.json()) as { id?: string; status?: "ACTIVE" | "FROZEN" | "CANCELLED" };
+    if (!payload.id) return Response.json({ error: "Informe a assinatura." }, { status: 400 });
+    if (payload.status !== "ACTIVE" && payload.status !== "FROZEN" && payload.status !== "CANCELLED") return Response.json({ error: "Status inválido." }, { status: 400 });
+    const body: Record<string, unknown> = { status: payload.status, cancelled_at: payload.status === "CANCELLED" ? new Date().toISOString().slice(0, 10) : null };
+    const [updated] = await supabaseRequest<Subscription[]>(`/rest/v1/subscriptions?id=eq.${payload.id}`, { method: "PATCH", prefer: "return=representation", body });
+    if (!updated) return Response.json({ error: "Assinatura não encontrada." }, { status: 404 });
+    return Response.json({ subscription: updated });
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : "Erro ao atualizar assinatura." }, { status: 500 });
+  }
+}
