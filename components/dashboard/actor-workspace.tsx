@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Copy, Link2, MoreHorizontal, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Copy, Link2, Link2Off, MoreHorizontal, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -393,6 +393,31 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
     toast.success("Link copiado.");
   }
 
+  const [deactivatingLinks, setDeactivatingLinks] = useState(false);
+
+  /** Deactivates every ACTIVE link of this actor at once — e.g. when a partner/embaixador leaves the program. Mirrors each link onto Asaas too (see `app/api/asaas/payment-links/bulk-status`). Existing subscriptions/payments already made through those links are untouched. */
+  async function deactivateAllLinks() {
+    const activeCount = links.filter((link) => link.status === "ACTIVE").length;
+    if (activeCount === 0) return;
+    if (!window.confirm(`Desativar todos os ${activeCount} link(s) ativo(s) de ${actor.name}? Eles deixam de aceitar pagamento no Asaas também — assinaturas já existentes não são afetadas.`)) return;
+    setDeactivatingLinks(true);
+    try {
+      const response = await fetch("/api/asaas/payment-links/bulk-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ actorId: actor.id, status: "INACTIVE" }),
+      });
+      const data = await response.json();
+      if (!response.ok) { toast.error(data.error ?? "Não foi possível desativar os links."); return; }
+      const failedNote = data.failed.length > 0 ? ` ${data.failed.length} falharam: ${data.failed.join(", ")}.` : "";
+      toast.success(`${data.succeeded}/${data.total} link(s) desativado(s) (no Asaas também).${failedNote}`);
+      await loadDetail();
+      onChanged();
+    } finally {
+      setDeactivatingLinks(false);
+    }
+  }
+
   async function syncPayments() {
     setSyncingPayments(true);
     try {
@@ -580,9 +605,16 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">Links gerados</p>
-                <Button variant="ghost" size="sm" disabled={syncingPayments} onClick={syncPayments} className="h-7 gap-1.5 text-xs text-[#3b82f6]">
-                  <RefreshCw className={`size-3.5 ${syncingPayments ? "animate-spin" : ""}`} />{syncingPayments ? "Sincronizando…" : "Sincronizar pagamentos"}
-                </Button>
+                <div className="flex items-center gap-1">
+                  <Button variant="ghost" size="sm" disabled={syncingPayments} onClick={syncPayments} className="h-7 gap-1.5 text-xs text-[#3b82f6]">
+                    <RefreshCw className={`size-3.5 ${syncingPayments ? "animate-spin" : ""}`} />{syncingPayments ? "Sincronizando…" : "Sincronizar pagamentos"}
+                  </Button>
+                  {links.some((link) => link.status === "ACTIVE") && (
+                    <Button variant="ghost" size="sm" disabled={deactivatingLinks} onClick={deactivateAllLinks} className="h-7 gap-1.5 text-xs text-red-600 hover:text-red-700">
+                      <Link2Off className="size-3.5" />{deactivatingLinks ? "Desativando…" : "Desativar todos os links"}
+                    </Button>
+                  )}
+                </div>
               </div>
               {links.map((link) => (
                 <div key={link.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 p-3">

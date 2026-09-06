@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Link2Off } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -46,13 +47,28 @@ function linkKind(link: PaymentLink, planById: Map<string, Plan>): Plan["kind"] 
 export function PlansUsageSection({ links, actors, onChanged }: { links: PaymentLink[]; actors: CommercialActor[]; onChanged: () => void }) {
   return (
     <div className="space-y-5">
-      <PlansPanel links={links} />
+      <PlansPanel links={links} onChanged={onChanged} />
       <LinksPanel links={links} actors={actors} onChanged={onChanged} />
     </div>
   );
 }
 
-function PlansPanel({ links }: { links: PaymentLink[] }) {
+/** Bulk ACTIVE/INACTIVE toggle for every link bound to a plan or to an actor — used both by the plan catalog's "Desativar links vinculados" and by the actor workspace's equivalent action. Mirrors each link onto Asaas (see `app/api/asaas/payment-links/bulk-status`). */
+async function bulkSetLinkStatus(target: { planId?: string; actorId?: string }, status: "ACTIVE" | "INACTIVE") {
+  const response = await fetch("/api/asaas/payment-links/bulk-status", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...target, status }),
+  });
+  const data = await response.json();
+  if (!response.ok) { toast.error(data.error ?? "Não foi possível atualizar os links."); return false; }
+  if (data.total === 0) { toast.info("Nenhum link para atualizar."); return false; }
+  const failedNote = data.failed.length > 0 ? ` ${data.failed.length} falharam: ${data.failed.join(", ")}.` : "";
+  toast.success(`${data.succeeded}/${data.total} link(s) ${status === "INACTIVE" ? "desativado(s)" : "reativado(s)"} (no Asaas também).${failedNote}`);
+  return true;
+}
+
+function PlansPanel({ links, onChanged }: { links: PaymentLink[]; onChanged: () => void }) {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -189,7 +205,7 @@ function PlansPanel({ links }: { links: PaymentLink[] }) {
             {columns.isVisible("installments") && <ResizableTh width={widths.getWidth("installments")} onResizeStart={widths.startResize("installments")}>Parcelamento</ResizableTh>}
             {columns.isVisible("activeLinks") && <ResizableTh width={widths.getWidth("activeLinks")} onResizeStart={widths.startResize("activeLinks")} className="text-right">Links ativos</ResizableTh>}
             {columns.isVisible("status") && <ResizableTh width={widths.getWidth("status")} onResizeStart={widths.startResize("status")}>Status</ResizableTh>}
-            <TableHead className="w-[132px]" />
+            <TableHead className="w-[168px]" />
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -205,6 +221,10 @@ function PlansPanel({ links }: { links: PaymentLink[] }) {
               onCancelEdit={() => setEditingId(null)}
               onSave={(patch) => savePlanEdit(plan, patch)}
               onToggleStatus={() => toggleStatus(plan)}
+              onDeactivateLinks={async () => {
+                if (!window.confirm(`Desativar todos os ${activeLinkCountByPlan.get(plan.id) ?? 0} link(s) ativo(s) do plano "${plan.name}"? Eles deixam de aceitar pagamento no Asaas também — assinaturas já existentes não são afetadas.`)) return;
+                if (await bulkSetLinkStatus({ planId: plan.id }, "INACTIVE")) onChanged();
+              }}
             />
           ))}
         </TableBody>
@@ -213,7 +233,7 @@ function PlansPanel({ links }: { links: PaymentLink[] }) {
   );
 }
 
-function PlanRow({ plan, activeLinks, editing, visibleColumns, onEdit, onCancelEdit, onSave, onToggleStatus }: {
+function PlanRow({ plan, activeLinks, editing, visibleColumns, onEdit, onCancelEdit, onSave, onToggleStatus, onDeactivateLinks }: {
   plan: Plan;
   activeLinks: number;
   editing: boolean;
@@ -222,6 +242,7 @@ function PlanRow({ plan, activeLinks, editing, visibleColumns, onEdit, onCancelE
   onCancelEdit: () => void;
   onSave: (patch: { name: string; standardValue: string; annualInstallmentLimit: string }) => void;
   onToggleStatus: () => void;
+  onDeactivateLinks: () => void;
 }) {
   const [name, setName] = useState(plan.name);
   const [standardValue, setStandardValue] = useState(plan.standard_value != null ? String(plan.standard_value) : "");
@@ -259,6 +280,11 @@ function PlanRow({ plan, activeLinks, editing, visibleColumns, onEdit, onCancelE
       <TableCell className="flex justify-end gap-1.5">
         <Button size="sm" variant="ghost" onClick={onEdit}>Editar</Button>
         <Button size="sm" variant="outline" onClick={onToggleStatus}>{plan.status === "ACTIVE" ? "Desativar" : "Ativar"}</Button>
+        {activeLinks > 0 && (
+          <Button size="sm" variant="ghost" onClick={onDeactivateLinks} title="Desativar todos os links vinculados a este plano (também no Asaas)" className="text-red-600 hover:text-red-700">
+            <Link2Off className="size-4" />
+          </Button>
+        )}
       </TableCell>
     </TableRow>
   );
