@@ -27,6 +27,7 @@ export function OverviewSection({ actors, customers, subscriptions, payments, im
     ["Upgrades de plano", String(summary.upgrades)], ["Downgrades de plano", String(summary.downgrades)],
     ["Mudanças de periodicidade", String(summary.periodChanges)], ["Anual → mensal", String(summary.annualToMonthly)], ["Mensal → anual", String(summary.monthlyToAnnual)],
     ["Impacto das mudanças no MRR", money.format(summary.totalMrrDelta)], ["Cancelamentos registrados", String(summary.cancellations)],
+    ["Reativações no período", String(summary.reactivations)], ["Valor das reativações", money.format(summary.reactivationValue)],
     ["Novos clientes no período", String(scoped.filter(customer => inPeriod(customer.signed_at)).length)],
     ["Recebido no período", money.format(paid.reduce((sum, payment) => sum + Number(payment.value), 0))],
     ["Implantações pagas no período", String(paidImplementations.length)],

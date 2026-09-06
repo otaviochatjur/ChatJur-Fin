@@ -17,6 +17,12 @@ test("validates dates, money and optional notes (required only for cancellation)
   assert.equal(activitySchema.safeParse({ ...valid, type: "CANCELLATION", amount: 0, notes: " ", subscriptionId: undefined }).success, false);
   assert.equal(activitySchema.safeParse({ ...valid, type: "CANCELLATION", amount: 0, notes: "Cliente insatisfeito", subscriptionId: undefined }).success, true);
 });
+test("REACTIVATION behaves like RENEWAL: requires a contracted amount, no subscriptionId, notes optional", () => {
+  assert.equal(activitySchema.safeParse({ ...valid, type: "REACTIVATION", amount: 597, subscriptionId: undefined }).success, true);
+  assert.equal(activitySchema.safeParse({ ...valid, type: "REACTIVATION", amount: 0, subscriptionId: undefined }).success, false);
+  assert.equal(activitySchema.safeParse({ ...valid, type: "REACTIVATION", amount: 597 }).success, false);
+  assert.equal(activitySchema.safeParse({ ...valid, type: "REACTIVATION", amount: 597, notes: "", subscriptionId: undefined }).success, true);
+});
 test("requires a subscriptionId for upsells/downsells and rejects it for other types", () => {
   assert.equal(activitySchema.safeParse({ ...valid, subscriptionId: undefined }).success, false);
   assert.equal(activitySchema.safeParse({ ...valid, type: "DOWNSELL", subscriptionId: undefined }).success, false);
@@ -107,6 +113,51 @@ test("lets operators edit and delete a stored activity", async () => {
     assert.equal(delNotFound.status, 404);
     const delNoId = await DELETE(new Request("http://localhost/api/customer-activities", { method: "DELETE" }));
     assert.equal(delNoId.status, 400);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (oldUrl === undefined) delete process.env.SUPABASE_URL; else process.env.SUPABASE_URL = oldUrl;
+    if (oldKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY; else process.env.SUPABASE_SERVICE_ROLE_KEY = oldKey;
+  }
+});
+
+test("auto-updates the customer's status when logging a cancellation or a reactivation", async () => {
+  const originalFetch = globalThis.fetch;
+  const oldUrl = process.env.SUPABASE_URL;
+  const oldKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  process.env.SUPABASE_URL = "https://example.invalid";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "test";
+  const customerPatches = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const parsed = new URL(url);
+    if (parsed.pathname.endsWith("/customers")) {
+      if (options.method === "PATCH") {
+        const body = JSON.parse(options.body);
+        customerPatches.push(body);
+        return Response.json([{ id: valid.customerId, ...body }]);
+      }
+      return Response.json([{ id: valid.customerId }]);
+    }
+    if (parsed.pathname.endsWith("/audit_events") && options.method === "POST") {
+      const body = JSON.parse(options.body);
+      if (body.entity_type === "customer") return Response.json([body]);
+      return Response.json([{ ...body, id: "saved", created_at: "2026-09-05T12:00:00Z" }]);
+    }
+    return Response.json([]);
+  };
+  try {
+    const { POST } = await vite.ssrLoadModule("/app/api/customer-activities/route.ts");
+    const cancelled = await POST(new Request("http://localhost/api/customer-activities", { method: "POST", body: JSON.stringify({ customerId: valid.customerId, type: "CANCELLATION", occurredOn: "2026-09-06", amount: 0, notes: "Cliente insatisfeito com o preço" }) }));
+    assert.equal(cancelled.status, 201);
+    assert.deepEqual(customerPatches[0], { status: "CANCELLED", cancelled_at: "2026-09-06", cancellation_reason: "Cliente insatisfeito com o preço" });
+
+    const reactivated = await POST(new Request("http://localhost/api/customer-activities", { method: "POST", body: JSON.stringify({ customerId: valid.customerId, type: "REACTIVATION", occurredOn: "2026-10-01", amount: 397, notes: "" }) }));
+    assert.equal(reactivated.status, 201);
+    assert.deepEqual(customerPatches[1], { status: "ACTIVE", cancelled_at: null });
+
+    // Other activity types must not touch customers.status at all.
+    const followUp = await POST(new Request("http://localhost/api/customer-activities", { method: "POST", body: JSON.stringify({ customerId: valid.customerId, type: "FOLLOW_UP", occurredOn: "2026-10-02", amount: 0, notes: "Ligação de retenção" }) }));
+    assert.equal(followUp.status, 201);
+    assert.equal(customerPatches.length, 2);
   } finally {
     globalThis.fetch = originalFetch;
     if (oldUrl === undefined) delete process.env.SUPABASE_URL; else process.env.SUPABASE_URL = oldUrl;

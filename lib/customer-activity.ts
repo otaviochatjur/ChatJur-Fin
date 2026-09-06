@@ -1,7 +1,7 @@
 import type { Subscription } from "./metrics";
 import { z } from "zod";
 
-export const activityLabels = { UPGRADE: "Upgrade de plano", DOWNGRADE: "Downgrade de plano", PERIOD_CHANGE: "Mudança de periodicidade", UPSELL: "Upsell", RENEWAL: "Renovação", DOWNSELL: "Downsell", CANCELLATION: "Cancelamento", FOLLOW_UP: "Acompanhamento" } as const;
+export const activityLabels = { UPGRADE: "Upgrade de plano", DOWNGRADE: "Downgrade de plano", PERIOD_CHANGE: "Mudança de periodicidade", UPSELL: "Upsell", RENEWAL: "Renovação", DOWNSELL: "Downsell", CANCELLATION: "Cancelamento", REACTIVATION: "Reativação", FOLLOW_UP: "Acompanhamento" } as const;
 export const itemCatalog = {
   INSTANCES: { label: "Instâncias", quantities: Array.from({ length: 10 }, (_, i) => i + 1) },
   USERS: { label: "Usuários", quantities: Array.from({ length: 30 }, (_, i) => i + 1) },
@@ -30,7 +30,7 @@ const planStateSchema = z.object({
 });
 export const activitySchema = z.object({
   customerId: z.string().uuid(),
-  type: z.enum(["UPGRADE", "DOWNGRADE", "PERIOD_CHANGE", "UPSELL", "RENEWAL", "DOWNSELL", "CANCELLATION", "FOLLOW_UP"]),
+  type: z.enum(["UPGRADE", "DOWNGRADE", "PERIOD_CHANGE", "UPSELL", "RENEWAL", "DOWNSELL", "CANCELLATION", "REACTIVATION", "FOLLOW_UP"]),
   occurredOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => !Number.isNaN(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value, "Data inválida"),
   amount: z.number().finite().min(0).max(999999999).refine(value => Math.abs(value * 100 - Math.round(value * 100)) < 0.00001, "Use até duas casas decimais"),
   notes: z.string().trim().max(5000),
@@ -57,7 +57,7 @@ export const activitySchema = z.object({
     if (Math.round(value.amount * 100) !== Math.round(itemsTotal(value.items) * 100)) ctx.addIssue({ code: "custom", path: ["amount"], message: "O total deve corresponder à soma dos itens" });
   }
   if (itemized !== Boolean(value.subscriptionId)) ctx.addIssue({ code: "custom", path: ["subscriptionId"], message: "Selecione a assinatura afetada por este upsell ou downsell" });
-  if (["UPSELL", "RENEWAL", "DOWNSELL"].includes(value.type) && value.amount <= 0) ctx.addIssue({ code: "custom", path: ["amount"], message: "Informe o valor contratado" });
+  if (["UPSELL", "RENEWAL", "DOWNSELL", "REACTIVATION"].includes(value.type) && value.amount <= 0) ctx.addIssue({ code: "custom", path: ["amount"], message: "Informe o valor contratado" });
   if (["FOLLOW_UP", "CANCELLATION"].includes(value.type) && value.amount !== 0) ctx.addIssue({ code: "custom", path: ["amount"], message: "Este registro não possui valor contratado" });
   if (value.type === "CANCELLATION" && !value.notes.length) ctx.addIssue({ code: "custom", path: ["notes"], message: "Informe o motivo do cancelamento" });
 });
@@ -71,6 +71,7 @@ export function summarizeActivities(events: CustomerActivity[]) {
   return {
     upsells: ofType("UPSELL").length, upsellValue: sum("UPSELL"), renewals: ofType("RENEWAL").length, renewalValue: sum("RENEWAL"), downsells: ofType("DOWNSELL").length,
     cancellations: ofType("CANCELLATION").length, downsellValue: sum("DOWNSELL"), upgrades: ofType("UPGRADE").length, downgrades: ofType("DOWNGRADE").length,
+    reactivations: ofType("REACTIVATION").length, reactivationValue: sum("REACTIVATION"),
     periodChanges: events.filter(e => e.planChange && e.planChange.before.period !== e.planChange.after.period).length,
     annualToMonthly: events.filter(e => e.planChange?.before.period === "ANNUAL" && e.planChange.after.period === "MONTHLY").length,
     monthlyToAnnual: events.filter(e => e.planChange?.before.period === "MONTHLY" && e.planChange.after.period === "ANNUAL").length,

@@ -30,7 +30,7 @@ export function CustomerTimeline({ customerId, subscriptions, events, onChanged 
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const monetary = ["UPSELL", "RENEWAL", "DOWNSELL"].includes(type);
+  const monetary = ["UPSELL", "RENEWAL", "DOWNSELL", "REACTIVATION"].includes(type);
 
   function resetForm() {
     setEditingId(null); setType("FOLLOW_UP"); setDate(localDate()); setAmount(""); setItems([]); setSubscriptionId(""); setNextName(""); setNextPeriod("MONTHLY"); setNextValue(""); setNotes("");
@@ -52,7 +52,7 @@ export function CustomerTimeline({ customerId, subscriptions, events, onChanged 
     } else {
       setSubscriptionId(""); setNextName(""); setNextPeriod("MONTHLY"); setNextValue("");
     }
-    setAmount(target.type === "RENEWAL" ? String(target.amount) : "");
+    setAmount(target.type === "RENEWAL" || target.type === "REACTIVATION" ? String(target.amount) : "");
   }
 
   async function save(event: React.FormEvent) {
@@ -114,7 +114,8 @@ export function CustomerTimeline({ customerId, subscriptions, events, onChanged 
         <p className="text-sm">Impacto no MRR: {money.format(planMrrDelta(planChange))}</p>
         <p className="text-sm text-slate-500">O novo valor passa a valer na data de vigência nos relatórios internos. Sem cobrança proporcional ou créditos. Este registro não altera cobranças no Asaas.</p>
       </fieldset>}
-      {monetary && !itemized && <label className="block text-sm">Valor da renovação (R$)<Input type="number" min="0.01" max="999999999" step="0.01" required value={amount} onChange={event => setAmount(event.target.value)} /></label>}
+      {monetary && !itemized && <label className="block text-sm">{type === "REACTIVATION" ? "Valor do novo contrato (R$)" : "Valor da renovação (R$)"}<Input type="number" min="0.01" max="999999999" step="0.01" required value={amount} onChange={event => setAmount(event.target.value)} /></label>}
+      {type === "REACTIVATION" && <p className="text-sm text-slate-500">Ao salvar, o cadastro do cliente volta automaticamente para o status Ativo. Lembre-se de garantir que exista uma assinatura ativa: pague por um novo link (a sincronização cria a assinatura sozinha) ou cadastre o plano manualmente em Assinaturas.</p>}
       {itemized && <fieldset className="space-y-3 rounded-lg border bg-white p-4">
         <legend className="px-1 text-sm font-semibold">{type === "UPSELL" ? "Itens adicionados" : "Itens removidos"}</legend>
         <p className="text-sm text-slate-500">Selecione os itens e informe o valor mensal total de cada um para a quantidade escolhida.</p>
@@ -136,8 +137,9 @@ export function CustomerTimeline({ customerId, subscriptions, events, onChanged 
             : "Somado ao valor da assinatura selecionada a partir desta data, refletindo no MRR em Visão Geral, Receita e Repasses. Sem cobrança proporcional; este registro não altera cobranças no Asaas."}
         </p>
       </fieldset>}
+      {type === "CANCELLATION" && <p className="text-sm text-slate-500">Ao salvar, o cadastro do cliente volta automaticamente para o status Cancelado.</p>}
       <label className="block text-sm">Observações{type === "CANCELLATION" ? "" : " (opcional)"}<Textarea required={type === "CANCELLATION"} maxLength={5000} value={notes} onChange={event => setNotes(event.target.value)} placeholder={type === "CANCELLATION" ? "Descreva o motivo do cancelamento." : "Descreva a mudança, o plano e o período contratado ou os próximos passos."} /></label>
-      <p className="text-xs text-slate-500">Este registro alimenta as métricas comerciais. Atualize o cadastro abaixo quando houver mudança de status; assinaturas e recebimentos continuam vinculados aos pagamentos.</p>
+      <p className="text-xs text-slate-500">Este registro alimenta as métricas comerciais. {["CANCELLATION", "REACTIVATION"].includes(type) ? "O status do cliente é atualizado automaticamente." : "Atualize o cadastro abaixo quando houver mudança de status."} Assinaturas e recebimentos continuam vinculados aos pagamentos.</p>
       <div className="flex gap-2">
         <Button disabled={saving || (needsSubscription && !subscription) || (itemized && (!items.length || total <= 0))} type="submit">{saving ? "Salvando…" : editingId ? "Salvar edição" : "Registrar acontecimento"}</Button>
         {editingId && <Button type="button" variant="outline" onClick={resetForm}>Cancelar edição</Button>}

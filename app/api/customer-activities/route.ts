@@ -36,13 +36,29 @@ async function validatePayload(payload: z.infer<typeof activitySchema>, excludeE
   return null;
 }
 
-/** Logging a CANCELLATION is the operator's authoritative signal that the relationship ended: mirror it onto `customers.status` (and `cancelled_at`/`cancellation_reason`) instead of leaving that in sync only by a separate manual edit. Deliberately doesn't touch `subscriptions.status` — a customer can have more than one subscription, and which one(s) to mark CANCELLED is still a manual per-subscription call (see the status editor on each subscription card). */
-async function syncCancellationOntoCustomer(payload: z.infer<typeof activitySchema>) {
-  if (payload.type !== "CANCELLATION") return;
+/**
+ * CANCELLATION and REACTIVATION are the operator's authoritative signal that
+ * the relationship ended or resumed: mirror that onto `customers.status`
+ * instead of relying on a separate manual edit staying in sync.
+ * - CANCELLATION sets `status=CANCELLED` plus `cancelled_at`/`cancellation_reason`.
+ * - REACTIVATION sets `status=ACTIVE` and clears `cancelled_at` (history of
+ *   the last cancellation reason is kept for context).
+ * Deliberately doesn't touch `subscriptions.status` — a customer can have
+ * more than one subscription, and which one(s) to mark is still a manual
+ * per-subscription call (status editor on each subscription card), or comes
+ * automatically from Asaas sync once the client pays again through a link.
+ */
+async function syncCustomerStatusFromActivity(payload: z.infer<typeof activitySchema>) {
+  const body = payload.type === "CANCELLATION"
+    ? { status: "CANCELLED", cancelled_at: payload.occurredOn, cancellation_reason: payload.notes || null }
+    : payload.type === "REACTIVATION"
+    ? { status: "ACTIVE", cancelled_at: null }
+    : null;
+  if (!body) return;
   const [customer] = await supabaseRequest<Record<string, unknown>[]>(`/rest/v1/customers?id=eq.${payload.customerId}`, {
     method: "PATCH",
     prefer: "return=representation",
-    body: { status: "CANCELLED", cancelled_at: payload.occurredOn, cancellation_reason: payload.notes || null },
+    body,
   });
   if (customer) await supabaseRequest("/rest/v1/audit_events", { method: "POST", body: { entity_type: "customer", entity_id: payload.customerId, action: "UPDATED", after_json: customer } });
 }
@@ -58,7 +74,7 @@ export async function POST(request: Request) {
       method: "POST", prefer: "return=representation",
       body: { entity_type: "customer_activity", entity_id: payload.customerId, action: payload.type, after_json: payload },
     });
-    await syncCancellationOntoCustomer(payload);
+    await syncCustomerStatusFromActivity(payload);
     return Response.json({ event: { ...row.after_json, id: row.id, createdAt: row.created_at } }, { status: 201 });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Erro ao salvar acompanhamento." }, { status: 500 });
@@ -83,7 +99,7 @@ export async function PATCH(request: Request) {
       method: "PATCH", prefer: "return=representation",
       body: { entity_id: payload.customerId, action: payload.type, after_json: payload },
     });
-    await syncCancellationOntoCustomer(payload);
+    await syncCustomerStatusFromActivity(payload);
     return Response.json({ event: { ...row.after_json, id: row.id, createdAt: row.created_at } });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Erro ao editar registro." }, { status: 500 });
