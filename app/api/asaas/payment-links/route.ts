@@ -118,12 +118,17 @@ export async function PATCH(request: Request) {
       }
     }
 
-    const nextActorId = payload.actorId !== undefined ? payload.actorId : current.actor_id;
     const nextPlanId = payload.planId !== undefined ? payload.planId : current.plan_id;
     // A manual ACTIVE/INACTIVE toggle (the "Desativar"/"Reativar" button)
     // always wins over the automatic PENDING/ACTIVE bookkeeping below, and —
     // unlike that bookkeeping, which is purely local — mirrors onto the real
     // link at Asaas so the payer actually can't pay it anymore either.
+    //
+    // Only the plan gates "pending": the actor is deliberately optional —
+    // plenty of links are direct company sales with no partner/embaixador/
+    // comercial behind them, and those are fully resolved once the plan is
+    // known, with no owner to assign. Requiring both used to leave
+    // plan-only-bound direct-sale links stuck as "pendente" forever.
     if (payload.status !== undefined) {
       body.status = payload.status;
       if ((payload.status === "ACTIVE" || payload.status === "INACTIVE") && current.asaas_payment_link_id) {
@@ -132,11 +137,9 @@ export async function PATCH(request: Request) {
           body: { active: payload.status === "ACTIVE" },
         });
       }
-    } else if (current.status === "PENDING" && nextActorId && nextPlanId) {
-      // Fully resolved now (both a plan and an owner) — automatically clears
-      // the "pending" flag without requiring a separate click.
+    } else if (current.status === "PENDING" && nextPlanId) {
       body.status = "ACTIVE";
-    } else if (current.status !== "INACTIVE" && (!nextActorId || !nextPlanId)) {
+    } else if (current.status !== "INACTIVE" && !nextPlanId) {
       body.status = "PENDING";
     }
     if (Object.keys(body).length === 0) return Response.json({ error: "Nada para atualizar." }, { status: 400 });
