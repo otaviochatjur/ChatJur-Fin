@@ -266,6 +266,9 @@ export const roleLabels: Record<CommercialActor["role"], string> = {
   INSTITUTIONAL: "Institucional",
 };
 
+/** The three Chat Jurídico Connect categories an actor can be reclassified between (see ActorWorkspace's "Dados" tab). "Comercial interno/externo" is a separate, unrelated grouping and isn't offered there. */
+export const connectRoles = ["PARTNER", "AMBASSADOR", "INSTITUTIONAL"] as const;
+
 /** Display label including the Plus tier for Parceiros (e.g. "Parceiro Plus"). */
 export function actorCategoryLabel(actor: Pick<CommercialActor, "role" | "tier">) {
   if (actor.role === "PARTNER" && actor.tier === "PLUS") return "Parceiro Plus";

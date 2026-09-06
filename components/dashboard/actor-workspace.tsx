@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { actorCategoryLabel, connectDefaultRatePercent, CONNECT_PLUS_ELIGIBILITY_CLIENTS, money, type ActorCustomPlan, type ActorMetrics, type CommercialActor, type CommissionRate, type PaymentLink, type Plan, type PriceVersion } from "@/lib/metrics";
+import { actorCategoryLabel, connectDefaultRatePercent, connectRoles, CONNECT_PLUS_ELIGIBILITY_CLIENTS, money, roleLabels, type ActorCustomPlan, type ActorMetrics, type CommercialActor, type CommissionRate, type PaymentLink, type Plan, type PriceVersion } from "@/lib/metrics";
 
 type BillingPeriod = "MONTHLY" | "ANNUAL";
 
@@ -81,6 +81,7 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
   const [profileBankAccountType, setProfileBankAccountType] = useState<"CORRENTE" | "POUPANCA" | "NONE">(actor.bank_account_type ?? "NONE");
   const [profileBankNotes, setProfileBankNotes] = useState(actor.bank_notes ?? "");
   const [profileTier, setProfileTier] = useState<"STANDARD" | "PLUS">(actor.tier ?? "STANDARD");
+  const [profileRole, setProfileRole] = useState<CommercialActor["role"]>(actor.role);
   const [profileInstagram, setProfileInstagram] = useState(actor.instagram ?? "");
   const [profileLinkedin, setProfileLinkedin] = useState(actor.linkedin ?? "");
   const [profileYoutube, setProfileYoutube] = useState(actor.youtube ?? "");
@@ -97,6 +98,7 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           id: actor.id,
+          ...(profileRole !== actor.role ? { role: profileRole } : {}),
           email: profileEmail.trim() || null,
           phone: profilePhone.trim() || null,
           notes: profileNotes.trim() || null,
@@ -107,7 +109,7 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
           bankAccount: profileBankAccount.trim() || null,
           bankAccountType: profileBankAccountType === "NONE" ? null : profileBankAccountType,
           bankNotes: profileBankNotes.trim() || null,
-          ...(actor.role === "PARTNER" ? { tier: profileTier } : {}),
+          ...(profileRole === "PARTNER" ? { tier: profileTier } : {}),
           instagram: profileInstagram.trim() || null,
           linkedin: profileLinkedin.trim() || null,
           youtube: profileYoutube.trim() || null,
@@ -420,7 +422,21 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
           <TabsTrigger value="performance">Resultado</TabsTrigger>
         </TabsList>
         <TabsContent value="data" className="mt-4 space-y-4">
-          {actor.role === "PARTNER" && (
+          {connectRoles.includes(actor.role as typeof connectRoles[number]) && (
+            <div className="space-y-2 rounded-xl border border-[#3b82f6]/30 bg-[#eef4fd] p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div><p className="text-sm font-medium">Categoria no Connect</p><p className="text-xs text-slate-500">Reclassifique entre Parceiro, Embaixador e Institucional a qualquer momento. Não altera taxas de repasse já configuradas por plano — a taxa padrão da categoria pode ser restaurada na aba Comissão.</p></div>
+                <Select value={profileRole} onValueChange={(value) => setProfileRole(value as CommercialActor["role"])}>
+                  <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {connectRoles.map((role) => <SelectItem key={role} value={role}>{roleLabels[role]}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              {profileRole !== actor.role && <p className="text-xs font-medium text-amber-600">Categoria será alterada para {roleLabels[profileRole]} ao salvar.</p>}
+            </div>
+          )}
+          {profileRole === "PARTNER" && (
             <div className="space-y-2 rounded-xl border border-[#3b82f6]/30 bg-[#eef4fd] p-3">
               <div className="flex items-center justify-between gap-2">
                 <div><p className="text-sm font-medium">Tier do parceiro</p><p className="text-xs text-slate-500">Plus dá 15% de repasse em vez de 10% — critério sugerido: {CONNECT_PLUS_ELIGIBILITY_CLIENTS}+ planos vendidos e ativos. Promoção é manual.</p></div>

@@ -45,6 +45,7 @@ export async function PATCH(request: Request) {
     const payload = await request.json() as {
       id?: string;
       status?: "ACTIVE" | "INACTIVE";
+      role?: typeof roles[number];
       tier?: typeof tiers[number];
       email?: string | null;
       phone?: string | null;
@@ -67,6 +68,15 @@ export async function PATCH(request: Request) {
 
     const body: Record<string, unknown> = {};
     if (payload.status !== undefined) body.status = payload.status;
+    // Recategorização entre Parceiro / Embaixador / Institucional (ou para
+    // fora do Connect). Deliberadamente não toca em actor_commission_rates
+    // nem actor_price_versions — a taxa padrão da categoria pode ser
+    // restaurada manualmente na aba Comissão ("Restaurar taxa padrão") se
+    // o operador quiser, mas overrides por plano são preservados.
+    if (payload.role !== undefined) {
+      if (!roles.includes(payload.role)) return Response.json({ error: "Papel comercial inválido." }, { status: 400 });
+      body.role = payload.role;
+    }
     if (payload.tier !== undefined && tiers.includes(payload.tier)) body.tier = payload.tier;
     if (payload.email !== undefined) body.email = payload.email;
     if (payload.phone !== undefined) body.phone = payload.phone;
