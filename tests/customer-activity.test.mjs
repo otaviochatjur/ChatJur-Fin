@@ -71,6 +71,49 @@ test("persists records and reads all pages without losing older events", async (
   }
 });
 
+test("lets operators edit and delete a stored activity", async () => {
+  const originalFetch = globalThis.fetch;
+  const oldUrl = process.env.SUPABASE_URL;
+  const oldKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  process.env.SUPABASE_URL = "https://example.invalid";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "test";
+  const stored = [{ id: "e1", created_at: "2026-09-05T12:00:00Z", entity_type: "customer_activity", after_json: { customerId: valid.customerId, type: "RENEWAL", occurredOn: "2026-09-05", amount: 1500, notes: "" } }];
+  globalThis.fetch = async (url, options = {}) => {
+    const parsed = new URL(url);
+    if (parsed.pathname.endsWith("/customers")) return Response.json([{ id: valid.customerId }]);
+    if (parsed.pathname.endsWith("/audit_events")) {
+      if (options.method === "PATCH") { Object.assign(stored[0], JSON.parse(options.body)); return Response.json([stored[0]]); }
+      if (options.method === "DELETE") { stored.length = 0; return new Response(null, { status: 204 }); }
+      return Response.json(stored.map((row) => ({ id: row.id }))); // existence check (select=id)
+    }
+    return Response.json([]);
+  };
+  try {
+    const { PATCH, DELETE } = await vite.ssrLoadModule("/app/api/customer-activities/route.ts");
+    const patched = await PATCH(new Request("http://localhost/api/customer-activities", { method: "PATCH", body: JSON.stringify({ id: "e1", customerId: valid.customerId, type: "RENEWAL", occurredOn: "2026-09-05", amount: 1800, notes: "Ajustado" }) }));
+    assert.equal(patched.status, 200);
+    const edited = (await patched.json()).event;
+    assert.equal(edited.amount, 1800);
+    assert.equal(edited.notes, "Ajustado");
+    assert.equal(edited.id, "e1");
+    const noId = await PATCH(new Request("http://localhost/api/customer-activities", { method: "PATCH", body: JSON.stringify({ customerId: valid.customerId, type: "RENEWAL", occurredOn: "2026-09-05", amount: 1800, notes: "" }) }));
+    assert.equal(noId.status, 400);
+    const badPayload = await PATCH(new Request("http://localhost/api/customer-activities", { method: "PATCH", body: JSON.stringify({ id: "e1", customerId: valid.customerId, type: "RENEWAL", occurredOn: "2026-09-05", amount: 0, notes: "" }) }));
+    assert.equal(badPayload.status, 400);
+    const del = await DELETE(new Request("http://localhost/api/customer-activities?id=e1", { method: "DELETE" }));
+    assert.equal(del.status, 200);
+    assert.equal(stored.length, 0);
+    const delNotFound = await DELETE(new Request("http://localhost/api/customer-activities?id=e1", { method: "DELETE" }));
+    assert.equal(delNotFound.status, 404);
+    const delNoId = await DELETE(new Request("http://localhost/api/customer-activities", { method: "DELETE" }));
+    assert.equal(delNoId.status, 400);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (oldUrl === undefined) delete process.env.SUPABASE_URL; else process.env.SUPABASE_URL = oldUrl;
+    if (oldKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY; else process.env.SUPABASE_SERVICE_ROLE_KEY = oldKey;
+  }
+});
+
 test("validates item quantities, options and exact totals for upsells and downsells", () => {
   const items = [{ kind: "INSTANCES", quantity: 10, amount: 70 }, { kind: "USERS", quantity: 30, amount: 50 }, { kind: "ATTENDANCES", quantity: 1000, amount: 100 }, { kind: "AUTOMATIONS", quantity: 40, amount: 20 }, { kind: "OPEN_API", quantity: null, amount: 30 }, { kind: "INTEGRATIONS", quantity: null, amount: 10 }];
   for (const type of ["UPSELL", "DOWNSELL"]) assert.equal(activitySchema.safeParse({ ...valid, type, items, amount: 280 }).success, true);
