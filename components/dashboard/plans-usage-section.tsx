@@ -5,6 +5,7 @@ import { Link2Off } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -270,7 +271,7 @@ function PlanRow({ plan, activeLinks, editing, visibleColumns, onEdit, onCancelE
 
   return (
     <TableRow>
-      <TableCell className="font-medium">{plan.name} <span className="text-xs text-slate-400">· {plan.code}</span></TableCell>
+      <TableCell className="font-medium">{plan.name}</TableCell>
       {visibleColumns("kind") && <TableCell><Badge variant="outline" className={planBadgeClass(plan)}>{planKindLabels[plan.kind]}</Badge></TableCell>}
       {visibleColumns("billingPeriod") && <TableCell><Badge variant="outline">{billingPeriodLabel}</Badge></TableCell>}
       {visibleColumns("value") && <TableCell className="text-right">{plan.standard_value != null ? money.format(plan.standard_value) : <span className="text-slate-400">Varia por link</span>}</TableCell>}
@@ -290,6 +291,8 @@ function PlanRow({ plan, activeLinks, editing, visibleColumns, onEdit, onCancelE
   );
 }
 
+type LinkDraft = { actorId?: string | null; planId?: string | null };
+
 function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors: CommercialActor[]; onChanged: () => void }) {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [filter, setFilter] = useState<(typeof linkFilters)[number]>("PENDING");
@@ -298,6 +301,14 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
   const [search, setSearch] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [confirmingBulk, setConfirmingBulk] = useState(false);
+  // Ator/plano escolhidos no <Select> ficam só em rascunho aqui — nada é
+  // salvo até o operador clicar em "Vincular" (linha) ou "Vincular
+  // selecionados" (lote). Evita vinculação acidental ao passar o mouse ou
+  // clicar errado no dropdown.
+  const [drafts, setDrafts] = useState<Record<string, LinkDraft>>({});
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const columns = useColumnVisibility(linkColumns);
   const widths = useColumnWidths(linkColumns);
 
@@ -314,6 +325,38 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
     .filter((link) => !term || link.display_name.toLowerCase().includes(term));
   const pendingCount = links.filter((link) => link.status === "PENDING").length;
 
+  function draftFor(link: PaymentLink): LinkDraft {
+    return drafts[link.id] ?? {};
+  }
+  function draftActorId(link: PaymentLink) {
+    const draft = draftFor(link);
+    return draft.actorId !== undefined ? draft.actorId : link.actor_id;
+  }
+  function draftPlanId(link: PaymentLink) {
+    const draft = draftFor(link);
+    return draft.planId !== undefined ? draft.planId : link.plan_id;
+  }
+  function isDirty(link: PaymentLink) {
+    const draft = draftFor(link);
+    return (draft.actorId !== undefined && draft.actorId !== link.actor_id) || (draft.planId !== undefined && draft.planId !== link.plan_id);
+  }
+  function setDraft(link: PaymentLink, patch: LinkDraft) {
+    setDrafts((current) => ({ ...current, [link.id]: { ...current[link.id], ...patch } }));
+  }
+  function clearDraft(id: string) {
+    setDrafts((current) => {
+      if (!(id in current)) return current;
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+  }
+
+  const dirtySelectedCount = [...selected].filter((id) => {
+    const link = links.find((l) => l.id === id);
+    return link && isDirty(link);
+  }).length;
+
   async function syncFromAsaas() {
     setSyncing(true);
     try {
@@ -327,24 +370,89 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
     }
   }
 
-  async function bind(link: PaymentLink, patch: { actorId?: string | null; planId?: string | null }) {
+  /** Raw PATCH call, no toast/refresh side effects — shared by the single-row and bulk confirm flows so bulk can aggregate one summary toast instead of one per link. */
+  async function applyBind(link: PaymentLink, patch: LinkDraft) {
     const response = await fetch("/api/asaas/payment-links", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: link.id, ...patch }),
     });
     const data = await response.json();
-    if (!response.ok) { toast.error(data.error ?? "Não foi possível vincular."); return; }
+    if (!response.ok) throw new Error(data.error ?? "Não foi possível vincular.");
     // Vincular um plano retroage: quem já pagou por este link antes tem sua
     // assinatura (ou pagamento de implantação/consultoria) atualizada agora
     // — sem isso, repasse por plano e receita por plano ficariam errados
     // para clientes antigos. Ver comentário na rota da API.
-    const b = data.backfilled;
-    if (b && (b.subscriptions > 0 || b.implementationPayments > 0)) {
-      const parts = [b.subscriptions > 0 ? `${b.subscriptions} assinatura(s)` : null, b.implementationPayments > 0 ? `${b.implementationPayments} pagamento(s) de implantação/consultoria` : null].filter(Boolean);
-      toast.success(`Plano vinculado. ${parts.join(" e ")} de clientes que já pagaram por este link foram atualizados retroativamente.`);
+    return data.backfilled as { subscriptions: number; implementationPayments: number } | null;
+  }
+
+  function backfillNote(subscriptions: number, implementationPayments: number) {
+    if (subscriptions === 0 && implementationPayments === 0) return "";
+    const parts = [subscriptions > 0 ? `${subscriptions} assinatura(s)` : null, implementationPayments > 0 ? `${implementationPayments} pagamento(s) de implantação/consultoria` : null].filter(Boolean);
+    return ` ${parts.join(" e ")} de clientes que já pagaram por este link foram atualizados retroativamente.`;
+  }
+
+  async function confirmLink(link: PaymentLink) {
+    const draft = draftFor(link);
+    if (!isDirty(link)) return;
+    setConfirmingId(link.id);
+    try {
+      const backfilled = await applyBind(link, draft);
+      clearDraft(link.id);
+      setSelected((current) => { const next = new Set(current); next.delete(link.id); return next; });
+      toast.success(`Link vinculado.${backfillNote(backfilled?.subscriptions ?? 0, backfilled?.implementationPayments ?? 0)}`);
+      onChanged();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível vincular.");
+    } finally {
+      setConfirmingId(null);
     }
-    onChanged();
+  }
+
+  async function confirmSelected() {
+    const targets = [...selected].map((id) => links.find((l) => l.id === id)).filter((link): link is PaymentLink => !!link && isDirty(link));
+    if (targets.length === 0) { toast.info("Nenhuma alteração pendente nas linhas selecionadas."); return; }
+    setConfirmingBulk(true);
+    let succeeded = 0;
+    let subsTotal = 0;
+    let implTotal = 0;
+    const failed: string[] = [];
+    try {
+      for (const link of targets) {
+        try {
+          const backfilled = await applyBind(link, draftFor(link));
+          succeeded += 1;
+          subsTotal += backfilled?.subscriptions ?? 0;
+          implTotal += backfilled?.implementationPayments ?? 0;
+          clearDraft(link.id);
+        } catch {
+          failed.push(link.display_name);
+        }
+      }
+      setSelected(new Set());
+      const failedNote = failed.length > 0 ? ` ${failed.length} falharam: ${failed.join(", ")}.` : "";
+      if (succeeded > 0) toast.success(`${succeeded} link(s) vinculado(s).${backfillNote(subsTotal, implTotal)}${failedNote}`);
+      else toast.error(`Não foi possível vincular os links selecionados.${failedNote}`);
+      onChanged();
+    } finally {
+      setConfirmingBulk(false);
+    }
+  }
+
+  function toggleSelected(id: string, checked: boolean) {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (checked) next.add(id); else next.delete(id);
+      return next;
+    });
+  }
+  const allFilteredSelected = filtered.length > 0 && filtered.every((link) => selected.has(link.id));
+  function toggleSelectAll(checked: boolean) {
+    setSelected((current) => {
+      const next = new Set(current);
+      for (const link of filtered) { if (checked) next.add(link.id); else next.delete(link.id); }
+      return next;
+    });
   }
 
   /** Deactivating actually disables the link at Asaas too (see the PATCH route) — the payer genuinely can't use it anymore, so it's worth a confirmation. Reactivating doesn't need one. */
@@ -374,7 +482,14 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
           <h2 className="font-semibold">Links de pagamento</h2>
           <p className="mt-1 text-sm text-slate-500">{pendingCount > 0 ? `${pendingCount} link(s) pendente(s) de vinculação` : "Todos os links estão vinculados"}</p>
         </div>
-        <Button variant="outline" size="sm" disabled={syncing} onClick={syncFromAsaas}>{syncing ? "Sincronizando…" : "Sincronizar links do Asaas"}</Button>
+        <div className="flex items-center gap-2">
+          {dirtySelectedCount > 0 && (
+            <Button size="sm" disabled={confirmingBulk} onClick={confirmSelected} className="bg-[#3a5d9d] text-white hover:bg-[#2c4a80]">
+              {confirmingBulk ? "Vinculando…" : `Vincular selecionados (${dirtySelectedCount})`}
+            </Button>
+          )}
+          <Button variant="outline" size="sm" disabled={syncing} onClick={syncFromAsaas}>{syncing ? "Sincronizando…" : "Sincronizar links do Asaas"}</Button>
+        </div>
       </div>
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 p-4">
         {linkFilters.map((value) => (
@@ -401,6 +516,7 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
       <Table className="table-fixed">
         <TableHeader>
           <TableRow>
+            <TableHead className="w-[40px]"><Checkbox checked={allFilteredSelected} onCheckedChange={(checked) => toggleSelectAll(checked === true)} aria-label="Selecionar todos os links filtrados" /></TableHead>
             <ResizableTh width={widths.getWidth("link", 260)} onResizeStart={widths.startResize("link", 260)}>Link</ResizableTh>
             {columns.isVisible("kind") && <ResizableTh width={widths.getWidth("kind")} onResizeStart={widths.startResize("kind")}>Tipo</ResizableTh>}
             {columns.isVisible("actor") && <ResizableTh width={widths.getWidth("actor")} onResizeStart={widths.startResize("actor")}>Ator</ResizableTh>}
@@ -408,23 +524,25 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
             {columns.isVisible("value") && <ResizableTh width={widths.getWidth("value")} onResizeStart={widths.startResize("value")} className="text-right">Valor</ResizableTh>}
             {columns.isVisible("source") && <ResizableTh width={widths.getWidth("source")} onResizeStart={widths.startResize("source")}>Origem</ResizableTh>}
             {columns.isVisible("status") && <ResizableTh width={widths.getWidth("status")} onResizeStart={widths.startResize("status")}>Status</ResizableTh>}
-            <TableHead className="w-[110px]" />
+            <TableHead className="w-[190px]" />
           </TableRow>
         </TableHeader>
         <TableBody>
-          {filtered.length === 0 && <TableRow><TableCell colSpan={columns.visibleCount + 2} className="text-center text-sm text-slate-500">Nenhum link nesse filtro.</TableCell></TableRow>}
+          {filtered.length === 0 && <TableRow><TableCell colSpan={columns.visibleCount + 3} className="text-center text-sm text-slate-500">Nenhum link nesse filtro.</TableCell></TableRow>}
           {filtered.map((link) => {
             const boundPlan = link.plan_id ? planById.get(link.plan_id) : undefined;
             const kind = linkKind(link, planById);
+            const dirty = isDirty(link);
             return (
-            <TableRow key={link.id}>
+            <TableRow key={link.id} className={dirty ? "bg-amber-50/60" : undefined}>
+              <TableCell><Checkbox checked={selected.has(link.id)} onCheckedChange={(checked) => toggleSelected(link.id, checked === true)} aria-label={`Selecionar ${link.display_name}`} /></TableCell>
               <TableCell className="max-w-[240px] truncate font-medium" title={link.display_name}>
                 {link.display_name}
               </TableCell>
               {columns.isVisible("kind") && <TableCell><Badge variant="outline" className={planBadgeClass({ kind, code: boundPlan?.code ?? "" })}>{planKindLabels[kind]}</Badge></TableCell>}
               {columns.isVisible("actor") && (
                 <TableCell>
-                  <Select value={link.actor_id ?? "none"} onValueChange={(value) => bind(link, { actorId: value === "none" ? null : value })}>
+                  <Select value={draftActorId(link) ?? "none"} onValueChange={(value) => setDraft(link, { actorId: value === "none" ? null : value })}>
                     <SelectTrigger className="w-44"><SelectValue placeholder="Sem ator" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">Sem ator</SelectItem>
@@ -435,7 +553,7 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
               )}
               {columns.isVisible("plan") && (
                 <TableCell>
-                  <Select value={link.plan_id ?? "none"} onValueChange={(value) => bind(link, { planId: value === "none" ? null : value })}>
+                  <Select value={draftPlanId(link) ?? "none"} onValueChange={(value) => setDraft(link, { planId: value === "none" ? null : value })}>
                     <SelectTrigger className="w-44"><SelectValue placeholder="Sem plano" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">Sem plano</SelectItem>
@@ -447,7 +565,12 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
               {columns.isVisible("value") && <TableCell className="text-right text-sm">{money.format(link.value)}<span className="ml-1 text-xs text-slate-400">{link.billing_period === "ANNUAL" ? "/ano" : link.billing_period === "ONE_TIME" ? " · taxa única" : "/mês"}</span></TableCell>}
               {columns.isVisible("source") && <TableCell className="text-xs text-slate-500">{link.source === "ASAAS_SYNC" ? "Importado do Asaas" : "Gerado aqui"}</TableCell>}
               {columns.isVisible("status") && <TableCell><StatusBadge status={link.status} /></TableCell>}
-              <TableCell>
+              <TableCell className="flex justify-end gap-1.5">
+                {dirty && (
+                  <Button size="sm" disabled={confirmingId === link.id} onClick={() => confirmLink(link)} className="bg-[#3a5d9d] text-white hover:bg-[#2c4a80]">
+                    {confirmingId === link.id ? "Vinculando…" : "Vincular"}
+                  </Button>
+                )}
                 <Button variant="ghost" size="sm" disabled={togglingId === link.id} onClick={() => toggleLinkStatus(link)} className={link.status === "INACTIVE" ? "text-emerald-700 hover:text-emerald-800" : "text-red-600 hover:text-red-700"}>
                   {togglingId === link.id ? "…" : link.status === "INACTIVE" ? "Reativar" : "Desativar"}
                 </Button>
