@@ -6,15 +6,23 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const vite = await createServer({ appType: "custom", configFile: false, root, resolve: { alias: { "@": root } }, server: { middlewareMode: true } });
 after(() => vite.close());
 const { activitySchema, summarizeActivities } = await vite.ssrLoadModule("/lib/customer-activity.ts");
-const valid = { customerId: "00000000-0000-4000-8000-000000000001", type: "UPSELL", occurredOn: "2026-09-05", amount: 120, notes: "Mais licenças" };
+const subscriptionId = "00000000-0000-4000-8000-000000000003";
+const valid = { customerId: "00000000-0000-4000-8000-000000000001", type: "UPSELL", occurredOn: "2026-09-05", amount: 120, notes: "Mais licenças", subscriptionId };
 test("validates dates, money and optional notes (required only for cancellation)", () => {
   assert.equal(activitySchema.safeParse(valid).success, true);
   for (const patch of [{ occurredOn: "2026-02-30" }, { amount: -1 }, { amount: 0 }, { amount: 1.001 }, { type: "UNKNOWN" }, { type: "FOLLOW_UP", amount: 10 }]) assert.equal(activitySchema.safeParse({ ...valid, ...patch }).success, false);
   assert.equal(activitySchema.safeParse({ ...valid, notes: " " }).success, true);
-  assert.equal(activitySchema.safeParse({ ...valid, type: "FOLLOW_UP", amount: 0, notes: "" }).success, true);
-  assert.equal(activitySchema.safeParse({ ...valid, type: "CANCELLATION", amount: 0, notes: "" }).success, false);
-  assert.equal(activitySchema.safeParse({ ...valid, type: "CANCELLATION", amount: 0, notes: " " }).success, false);
-  assert.equal(activitySchema.safeParse({ ...valid, type: "CANCELLATION", amount: 0, notes: "Cliente insatisfeito" }).success, true);
+  assert.equal(activitySchema.safeParse({ ...valid, type: "FOLLOW_UP", amount: 0, notes: "", subscriptionId: undefined }).success, true);
+  assert.equal(activitySchema.safeParse({ ...valid, type: "CANCELLATION", amount: 0, notes: "", subscriptionId: undefined }).success, false);
+  assert.equal(activitySchema.safeParse({ ...valid, type: "CANCELLATION", amount: 0, notes: " ", subscriptionId: undefined }).success, false);
+  assert.equal(activitySchema.safeParse({ ...valid, type: "CANCELLATION", amount: 0, notes: "Cliente insatisfeito", subscriptionId: undefined }).success, true);
+});
+test("requires a subscriptionId for upsells/downsells and rejects it for other types", () => {
+  assert.equal(activitySchema.safeParse({ ...valid, subscriptionId: undefined }).success, false);
+  assert.equal(activitySchema.safeParse({ ...valid, type: "DOWNSELL", subscriptionId: undefined }).success, false);
+  assert.equal(activitySchema.safeParse({ ...valid, type: "RENEWAL", amount: 1500, subscriptionId: undefined }).success, true);
+  assert.equal(activitySchema.safeParse({ ...valid, type: "RENEWAL", amount: 1500 }).success, false);
+  assert.equal(activitySchema.safeParse({ ...valid, type: "FOLLOW_UP", amount: 0, notes: "", subscriptionId: undefined }).success, true);
 });
 test("counts commercial events rather than distinct customers and separates revenue categories", () => {
   const result = summarizeActivities([{ ...valid, amount: 0.1 }, { ...valid, amount: 0.2 }, { ...valid, type: "RENEWAL", amount: 1500 }, { ...valid, type: "FOLLOW_UP", amount: 0 }]);
@@ -33,6 +41,7 @@ test("persists records and reads all pages without losing older events", async (
   globalThis.fetch = async (url, options = {}) => {
     const parsed = new URL(url);
     if (parsed.pathname.endsWith("/customers")) return Response.json([{ id: valid.customerId }]);
+    if (parsed.pathname.endsWith("/subscriptions")) return Response.json([{ id: subscriptionId }]);
     if (options.method === "POST") {
       const body = JSON.parse(options.body);
       assert.equal(body.entity_type, "customer_activity");
@@ -74,8 +83,8 @@ test("validates item quantities, options and exact totals for upsells and downse
 
 test("counts combined plan and cycle changes once financially and applies them on the effective date", async () => {
   const { effectiveSubscriptions, planMrrDelta } = await vite.ssrLoadModule("/lib/customer-activity.ts");
-  const subscriptionId = "00000000-0000-4000-8000-000000000002";
-  const event = { ...valid, id: "event", createdAt: "2026-09-05T12:00:00Z", type: "UPGRADE", occurredOn: "2026-10-01", amount: 3600, planChange: { subscriptionId, before: { name: "Inicial", period: "MONTHLY", value: 200 }, after: { name: "Pro", period: "ANNUAL", value: 3600 } } };
+  const planSubscriptionId = "00000000-0000-4000-8000-000000000002";
+  const event = { ...valid, subscriptionId: undefined, id: "event", createdAt: "2026-09-05T12:00:00Z", type: "UPGRADE", occurredOn: "2026-10-01", amount: 3600, planChange: { subscriptionId: planSubscriptionId, before: { name: "Inicial", period: "MONTHLY", value: 200 }, after: { name: "Pro", period: "ANNUAL", value: 3600 } } };
   assert.equal(activitySchema.safeParse(event).success, true);
   assert.equal(planMrrDelta(event.planChange), 100);
   const summary = summarizeActivities([event]);
@@ -83,15 +92,45 @@ test("counts combined plan and cycle changes once financially and applies them o
   assert.equal(summary.periodChanges, 1);
   assert.equal(summary.monthlyToAnnual, 1);
   assert.equal(summary.planMrrDelta, 100);
-  const base = [{ id: subscriptionId, customer_id: valid.customerId, plan_name_raw: "Inicial", billing_period: "MONTHLY", value: 200 }];
+  assert.equal(summary.totalMrrDelta, 100);
+  const base = [{ id: planSubscriptionId, customer_id: valid.customerId, billing_period: "MONTHLY", plan_name_raw: "Inicial", value: 200 }];
   assert.equal(effectiveSubscriptions(base, [event], "2026-09-30")[0].value, 200);
   assert.equal(effectiveSubscriptions(base, [event], "2026-10-01")[0].value, 3600);
   assert.equal(base[0].value, 200);
-  const downgrade = { ...event, type: "DOWNGRADE", amount: 200, planChange: { subscriptionId, before: event.planChange.after, after: event.planChange.before } };
+  const downgrade = { ...event, type: "DOWNGRADE", amount: 200, planChange: { subscriptionId: planSubscriptionId, before: event.planChange.after, after: event.planChange.before } };
   assert.equal(summarizeActivities([downgrade]).planMrrDelta, -100);
   assert.equal(summarizeActivities([downgrade]).annualToMonthly, 1);
   assert.equal(activitySchema.safeParse({ ...event, type: "PERIOD_CHANGE" }).success, false);
   assert.equal(activitySchema.safeParse({ ...event, planChange: undefined }).success, false);
   const cycleOnly = { ...event, type: "PERIOD_CHANGE", planChange: { ...event.planChange, after: { ...event.planChange.after, name: "Inicial" } } };
   assert.equal(activitySchema.safeParse(cycleOnly).success, true);
+});
+
+test("upsells and downsells add/subtract their monthly amount from the affected subscription's MRR", async () => {
+  const { effectiveSubscriptions, itemizedMrrDelta } = await vite.ssrLoadModule("/lib/customer-activity.ts");
+  const monthlySubId = "00000000-0000-4000-8000-000000000004";
+  const annualSubId = "00000000-0000-4000-8000-000000000005";
+  const upsell = { ...valid, subscriptionId: monthlySubId, id: "u1", createdAt: "2026-09-05T12:00:00Z", type: "UPSELL", occurredOn: "2026-09-10", amount: 50, items: [{ kind: "USERS", quantity: 5, amount: 50 }] };
+  const downsell = { ...valid, subscriptionId: monthlySubId, id: "d1", createdAt: "2026-09-15T12:00:00Z", type: "DOWNSELL", occurredOn: "2026-09-20", amount: 20, items: [{ kind: "USERS", quantity: 2, amount: 20 }] };
+  assert.equal(itemizedMrrDelta(upsell), 50);
+  assert.equal(itemizedMrrDelta(downsell), -20);
+
+  // MONTHLY: amount adds directly to value.
+  const monthlyBase = [{ id: monthlySubId, customer_id: valid.customerId, billing_period: "MONTHLY", plan_name_raw: "Plano IA", value: 197 }];
+  assert.equal(effectiveSubscriptions(monthlyBase, [upsell], "2026-09-09")[0].value, 197);
+  assert.equal(effectiveSubscriptions(monthlyBase, [upsell], "2026-09-10")[0].value, 247);
+  assert.equal(effectiveSubscriptions(monthlyBase, [upsell, downsell], "2026-09-20")[0].value, 227);
+
+  // ANNUAL: amount is a monthly-equivalent delta, so it's scaled by 12 before being added to the yearly face value.
+  const annualUpsell = { ...upsell, id: "u2", subscriptionId: annualSubId, amount: 100, items: [{ kind: "USERS", quantity: 10, amount: 100 }] };
+  const annualBase = [{ id: annualSubId, customer_id: valid.customerId, billing_period: "ANNUAL", plan_name_raw: "Plano IA Anual", value: 2364 }];
+  assert.equal(effectiveSubscriptions(annualBase, [annualUpsell], "2026-09-10")[0].value, 3564);
+
+  // Combined with a plan upgrade on the same subscription: the upsell adds on top of the new plan value.
+  const upgrade = { ...valid, subscriptionId: undefined, id: "up1", createdAt: "2026-09-01T00:00:00Z", type: "UPGRADE", occurredOn: "2026-09-05", amount: 297, planChange: { subscriptionId: monthlySubId, before: { name: "Inicial", period: "MONTHLY", value: 197 }, after: { name: "Pro", period: "MONTHLY", value: 297 } } };
+  assert.equal(effectiveSubscriptions(monthlyBase, [upgrade, upsell], "2026-09-10")[0].value, 347);
+
+  // An untouched subscription (different id) is returned as-is.
+  const other = [{ id: "00000000-0000-4000-8000-000000000006", customer_id: valid.customerId, billing_period: "MONTHLY", plan_name_raw: "Outro", value: 100 }];
+  assert.equal(effectiveSubscriptions(other, [upsell], "2026-09-10")[0], other[0]);
 });

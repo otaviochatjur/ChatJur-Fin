@@ -26,7 +26,7 @@ export function OverviewSection({ actors, customers, subscriptions, payments, im
     ["Downsells no período", String(summary.downsells)], ["Redução por downsells", money.format(summary.downsellValue)],
     ["Upgrades de plano", String(summary.upgrades)], ["Downgrades de plano", String(summary.downgrades)],
     ["Mudanças de periodicidade", String(summary.periodChanges)], ["Anual → mensal", String(summary.annualToMonthly)], ["Mensal → anual", String(summary.monthlyToAnnual)],
-    ["Impacto das mudanças no MRR", money.format(summary.planMrrDelta)], ["Cancelamentos registrados", String(summary.cancellations)],
+    ["Impacto das mudanças no MRR", money.format(summary.totalMrrDelta)], ["Cancelamentos registrados", String(summary.cancellations)],
     ["Novos clientes no período", String(scoped.filter(customer => inPeriod(customer.signed_at)).length)],
     ["Recebido no período", money.format(paid.reduce((sum, payment) => sum + Number(payment.value), 0))],
     ["Implantações pagas no período", String(paidImplementations.length)],
@@ -44,7 +44,7 @@ export function OverviewSection({ actors, customers, subscriptions, payments, im
         <label className="text-sm">Status atual<select className={selectClass} value={status} onChange={event => setStatus(event.target.value)}><option value="all">Todos os status</option><option value="ACTIVE">Ativo</option><option value="FROZEN">Congelado</option><option value="CANCELLED">Cancelado</option></select></label>
       </div>
       {invalidPeriod && <p role="alert" className="mt-3 text-sm text-red-700">A data inicial deve ser anterior ou igual à data final.</p>}
-      <p className="mt-3 text-sm text-slate-500">{scoped.length} cliente(s) selecionado(s). Os registros são contados pela data do acontecimento ou vigência. Mudanças simultâneas de plano e periodicidade entram nas duas contagens, com impacto único no MRR. Valores anuais são divididos por 12; não há cobrança proporcional.</p>
+      <p className="mt-3 text-sm text-slate-500">{scoped.length} cliente(s) selecionado(s). Os registros são contados pela data do acontecimento ou vigência. Mudanças simultâneas de plano e periodicidade entram nas duas contagens, com impacto único no MRR. Upsells e downsells também entram no MRR das assinaturas afetadas a partir da data registrada. Valores anuais são divididos por 12; não há cobrança proporcional.</p>
     </section>
     {!invalidPeriod && <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{cards.map(([label, value]) => <article key={label} className="rounded-2xl border border-slate-200 bg-white p-5"><p className="text-sm text-slate-500">{label}</p><p className="mt-3 text-2xl font-semibold text-[#24477e]">{value}</p></article>)}</section>}
     <section className="rounded-2xl border border-slate-200 bg-white p-5">

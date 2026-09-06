@@ -35,9 +35,15 @@ export const activitySchema = z.object({
   amount: z.number().finite().min(0).max(999999999).refine(value => Math.abs(value * 100 - Math.round(value * 100)) < 0.00001, "Use até duas casas decimais"),
   notes: z.string().trim().max(5000),
   items: z.array(itemSchema).max(6).optional(),
+  // Which subscription an UPSELL/DOWNSELL applies to, so its value feeds the
+  // MRR shown across the app (Visão Geral, Receita e MRR, repasses) the same
+  // way an UPGRADE/DOWNGRADE does — see `effectiveSubscriptions`. Plan-change
+  // types carry their own subscriptionId inside `planChange` instead.
+  subscriptionId: z.string().uuid().optional(),
   planChange: z.object({ subscriptionId: z.string().uuid(), before: planStateSchema, after: planStateSchema }).optional(),
 }).superRefine((value, ctx) => {
   const changesPlan = ["UPGRADE", "DOWNGRADE", "PERIOD_CHANGE"].includes(value.type);
+  const itemized = ["UPSELL", "DOWNSELL"].includes(value.type);
   if (changesPlan !== Boolean(value.planChange)) ctx.addIssue({ code: "custom", message: "Informe os planos anterior e novo para esta mudança" });
   if (value.planChange) {
     const { before, after } = value.planChange;
@@ -46,10 +52,11 @@ export const activitySchema = z.object({
     if (value.type !== "PERIOD_CHANGE" && before.name === after.name) ctx.addIssue({ code: "custom", message: "Selecione um plano diferente para upgrade ou downgrade" });
   }
   if (value.items !== undefined) {
-    if (!["UPSELL", "DOWNSELL"].includes(value.type) || !value.items.length) ctx.addIssue({ code: "custom", path: ["items"], message: "Selecione os itens do upsell ou downsell" });
+    if (!itemized || !value.items.length) ctx.addIssue({ code: "custom", path: ["items"], message: "Selecione os itens do upsell ou downsell" });
     if (new Set(value.items.map(item => item.kind)).size !== value.items.length) ctx.addIssue({ code: "custom", path: ["items"], message: "Não repita o mesmo item" });
     if (Math.round(value.amount * 100) !== Math.round(itemsTotal(value.items) * 100)) ctx.addIssue({ code: "custom", path: ["amount"], message: "O total deve corresponder à soma dos itens" });
   }
+  if (itemized !== Boolean(value.subscriptionId)) ctx.addIssue({ code: "custom", path: ["subscriptionId"], message: "Selecione a assinatura afetada por este upsell ou downsell" });
   if (["UPSELL", "RENEWAL", "DOWNSELL"].includes(value.type) && value.amount <= 0) ctx.addIssue({ code: "custom", path: ["amount"], message: "Informe o valor contratado" });
   if (["FOLLOW_UP", "CANCELLATION"].includes(value.type) && value.amount !== 0) ctx.addIssue({ code: "custom", path: ["amount"], message: "Este registro não possui valor contratado" });
   if (value.type === "CANCELLATION" && !value.notes.length) ctx.addIssue({ code: "custom", path: ["notes"], message: "Informe o motivo do cancelamento" });
@@ -61,19 +68,46 @@ export function localDate() {
 export function summarizeActivities(events: CustomerActivity[]) {
   const ofType = (type: CustomerActivity["type"]) => events.filter(event => event.type === type);
   const sum = (type: CustomerActivity["type"]) => ofType(type).reduce((total, event) => total + Math.round(event.amount * 100), 0) / 100;
-  return { upsells: ofType("UPSELL").length, upsellValue: sum("UPSELL"), renewals: ofType("RENEWAL").length, renewalValue: sum("RENEWAL"), downsells: ofType("DOWNSELL").length, cancellations: ofType("CANCELLATION").length, downsellValue: sum("DOWNSELL"), upgrades: ofType("UPGRADE").length, downgrades: ofType("DOWNGRADE").length, periodChanges: events.filter(e => e.planChange && e.planChange.before.period !== e.planChange.after.period).length, annualToMonthly: events.filter(e => e.planChange?.before.period === "ANNUAL" && e.planChange.after.period === "MONTHLY").length, monthlyToAnnual: events.filter(e => e.planChange?.before.period === "MONTHLY" && e.planChange.after.period === "ANNUAL").length, planMrrDelta: Math.round(events.reduce((sum, e) => sum + planMrrDelta(e.planChange), 0) * 100) / 100 };
+  return {
+    upsells: ofType("UPSELL").length, upsellValue: sum("UPSELL"), renewals: ofType("RENEWAL").length, renewalValue: sum("RENEWAL"), downsells: ofType("DOWNSELL").length,
+    cancellations: ofType("CANCELLATION").length, downsellValue: sum("DOWNSELL"), upgrades: ofType("UPGRADE").length, downgrades: ofType("DOWNGRADE").length,
+    periodChanges: events.filter(e => e.planChange && e.planChange.before.period !== e.planChange.after.period).length,
+    annualToMonthly: events.filter(e => e.planChange?.before.period === "ANNUAL" && e.planChange.after.period === "MONTHLY").length,
+    monthlyToAnnual: events.filter(e => e.planChange?.before.period === "MONTHLY" && e.planChange.after.period === "ANNUAL").length,
+    planMrrDelta: Math.round(events.reduce((sum, e) => sum + planMrrDelta(e.planChange), 0) * 100) / 100,
+    // Upsells/downsells applied to a subscription (see `effectiveSubscriptions`) affect MRR too, separate from plan-change deltas above.
+    itemizedMrrDelta: Math.round(events.reduce((sum, e) => sum + itemizedMrrDelta(e), 0) * 100) / 100,
+    totalMrrDelta: Math.round(events.reduce((sum, e) => sum + planMrrDelta(e.planChange) + itemizedMrrDelta(e), 0) * 100) / 100,
+  };
 }
 
 export function planMrrDelta(change: CustomerActivity["planChange"]) {
   if (!change) return 0;
   return change.after.value / (change.after.period === "ANNUAL" ? 12 : 1) - change.before.value / (change.before.period === "ANNUAL" ? 12 : 1);
 }
+
+/** MRR impact of a single UPSELL/DOWNSELL event: `amount` is entered (and displayed) as a monthly-equivalent value, so it applies directly regardless of the affected subscription's billing period — the conversion to the subscription's native `value` unit happens in `effectiveSubscriptions`. */
+export function itemizedMrrDelta(event: Pick<CustomerActivity, "type" | "amount">) {
+  if (event.type === "UPSELL") return event.amount;
+  if (event.type === "DOWNSELL") return -event.amount;
+  return 0;
+}
+
 export function effectiveSubscriptions(subscriptions: Subscription[], events: CustomerActivity[], on = localDate()) {
-  const ordered = events.filter(e => e.planChange && e.occurredOn <= on).sort((a, b) => a.occurredOn.localeCompare(b.occurredOn) || a.createdAt.localeCompare(b.createdAt));
+  const due = events.filter(e => e.occurredOn <= on);
+  const planEvents = due.filter(e => e.planChange).sort((a, b) => a.occurredOn.localeCompare(b.occurredOn) || a.createdAt.localeCompare(b.createdAt));
+  const itemizedEvents = due.filter(e => e.subscriptionId && (e.type === "UPSELL" || e.type === "DOWNSELL"));
   return subscriptions.map(subscription => {
-    const event = ordered.filter(e => e.planChange?.subscriptionId === subscription.id && e.customerId === subscription.customer_id).at(-1);
-    if (!event?.planChange) return subscription;
-    const next = event.planChange.after;
-    return { ...subscription, plan_id: null, custom_plan_id: null, plan_name_raw: next.name, billing_period: next.period, value: next.value };
+    const planEvent = planEvents.filter(e => e.planChange?.subscriptionId === subscription.id && e.customerId === subscription.customer_id).at(-1);
+    const next = planEvent?.planChange?.after;
+    const billingPeriod = next?.period ?? subscription.billing_period;
+    const baseValue = next?.value ?? subscription.value;
+    const monthlyDelta = itemizedEvents
+      .filter(e => e.subscriptionId === subscription.id && e.customerId === subscription.customer_id)
+      .reduce((sum, e) => sum + itemizedMrrDelta(e), 0);
+    if (!next && monthlyDelta === 0) return subscription;
+    // `value` is a monthly face value for MONTHLY plans and a yearly total for ANNUAL ones (see `monthlyValue`); upsell/downsell amounts are always entered as the monthly-equivalent delta, so an ANNUAL subscription needs that delta scaled back up by 12 before adding it to the yearly total.
+    const value = Math.round((baseValue + (billingPeriod === "ANNUAL" ? monthlyDelta * 12 : monthlyDelta)) * 100) / 100;
+    return { ...subscription, plan_id: next ? null : subscription.plan_id, custom_plan_id: next ? null : subscription.custom_plan_id, plan_name_raw: next?.name ?? subscription.plan_name_raw, billing_period: billingPeriod, value };
   });
 }

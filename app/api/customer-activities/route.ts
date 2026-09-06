@@ -31,6 +31,10 @@ export async function POST(request: Request) {
       const [current] = effectiveSubscriptions(base, events, payload.occurredOn);
       if ((current.plan_name_raw ?? "Plano") !== change.before.name || current.billing_period !== change.before.period || Number(current.value) !== change.before.value) return Response.json({ error: "A assinatura mudou. Reabra o cliente para atualizar os dados." }, { status: 409 });
     }
+    if (payload.subscriptionId && (payload.type === "UPSELL" || payload.type === "DOWNSELL")) {
+      const base = await supabaseRequest<{ id: string }[]>(`/rest/v1/subscriptions?id=eq.${payload.subscriptionId}&customer_id=eq.${payload.customerId}&status=eq.ACTIVE&select=id`);
+      if (!base.length) return Response.json({ error: "Assinatura ativa não encontrada para este cliente." }, { status: 400 });
+    }
     const [row] = await supabaseRequest<StoredActivity[]>("/rest/v1/audit_events", {
       method: "POST", prefer: "return=representation",
       body: { entity_type: "customer_activity", entity_id: payload.customerId, action: payload.type, after_json: payload },
