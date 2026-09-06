@@ -10,18 +10,18 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { ColumnVisibilityMenu, useColumnVisibility, type ColumnDef } from "@/components/dashboard/table-toolbar";
+import { ColumnVisibilityMenu, ResizableTh, useColumnVisibility, useColumnWidths, type ColumnDef } from "@/components/dashboard/table-toolbar";
 import { isPaidStatus, money, monthlyValue, roleLabels, type CommercialActor, type Customer, type ImplementationPayment, type Payment, type PaymentLink, type Subscription } from "@/lib/metrics";
 import { localDate } from "@/lib/customer-activity";
 
 const clientColumns: ColumnDef<"status" | "plan" | "mrr" | "actor" | "signedAt">[] = [
-  { key: "status", label: "Status" },
-  { key: "plan", label: "Plano" },
-  { key: "mrr", label: "MRR" },
-  { key: "actor", label: "Parceiro" },
-  { key: "signedAt", label: "Assinado em" },
+  { key: "status", label: "Status", defaultWidth: 120 },
+  { key: "plan", label: "Plano", defaultWidth: 260 },
+  { key: "mrr", label: "MRR", defaultWidth: 110 },
+  { key: "actor", label: "Parceiro", defaultWidth: 160 },
+  { key: "signedAt", label: "Assinado em", defaultWidth: 130 },
 ];
 
 const statusLabels: Record<Customer["status"], string> = { ACTIVE: "Ativo", CANCELLED: "Cancelado", FROZEN: "Congelado" };
@@ -62,6 +62,7 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
   const [syncingAll, setSyncingAll] = useState(false);
   const [lastSync, setLastSync] = useState<PaymentSyncRun | null>(null);
   const columns = useColumnVisibility(clientColumns);
+  const widths = useColumnWidths(clientColumns);
 
   async function loadLastSync() {
     const response = await fetch("/api/audit-events?entityType=payment_sync&limit=1");
@@ -168,15 +169,15 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
           </Select>
           <ColumnVisibilityMenu defs={clientColumns} isVisible={columns.isVisible} toggle={columns.toggle} />
         </div>
-        <Table>
+        <Table className="table-fixed">
           <TableHeader>
             <TableRow>
-              <TableHead>Cliente</TableHead>
-              {columns.isVisible("status") && <TableHead>Status</TableHead>}
-              {columns.isVisible("plan") && <TableHead>Plano</TableHead>}
-              {columns.isVisible("mrr") && <TableHead className="text-right">MRR</TableHead>}
-              {columns.isVisible("actor") && <TableHead>Parceiro</TableHead>}
-              {columns.isVisible("signedAt") && <TableHead>Assinado em</TableHead>}
+              <ResizableTh width={widths.getWidth("client", 220)} onResizeStart={widths.startResize("client", 220)}>Cliente</ResizableTh>
+              {columns.isVisible("status") && <ResizableTh width={widths.getWidth("status")} onResizeStart={widths.startResize("status")}>Status</ResizableTh>}
+              {columns.isVisible("plan") && <ResizableTh width={widths.getWidth("plan")} onResizeStart={widths.startResize("plan")}>Plano</ResizableTh>}
+              {columns.isVisible("mrr") && <ResizableTh width={widths.getWidth("mrr")} onResizeStart={widths.startResize("mrr")} className="text-right">MRR</ResizableTh>}
+              {columns.isVisible("actor") && <ResizableTh width={widths.getWidth("actor")} onResizeStart={widths.startResize("actor")}>Parceiro</ResizableTh>}
+              {columns.isVisible("signedAt") && <ResizableTh width={widths.getWidth("signedAt")} onResizeStart={widths.startResize("signedAt")}>Assinado em</ResizableTh>}
             </TableRow>
           </TableHeader>
           <TableBody>

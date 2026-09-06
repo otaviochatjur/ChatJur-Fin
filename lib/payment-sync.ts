@@ -15,6 +15,18 @@ type PaymentLinkRow = {
 };
 type CustomerRow = { id: string; email: string | null; asaas_customer_id: string | null; acquisition_actor_id: string | null; status: string };
 type SubscriptionRow = { id: string; status: string; asaas_subscription_id: string | null; asaas_installment_id: string | null };
+/** Full shape needed to keep tracking a subscription whose payments stopped carrying a `paymentLink` (see `resolveOrphanSubscription`). */
+type SubscriptionFullRow = SubscriptionRow & {
+  customer_id: string;
+  plan_id: string | null;
+  custom_plan_id: string | null;
+  plan_name_raw: string | null;
+  payment_link_id: string | null;
+  actor_id: string | null;
+  billing_period: "MONTHLY" | "ANNUAL";
+  value: number;
+};
+const SUBSCRIPTION_FULL_SELECT = "id,status,asaas_subscription_id,asaas_installment_id,customer_id,plan_id,custom_plan_id,plan_name_raw,payment_link_id,actor_id,billing_period,value";
 
 const PAID_STATUSES = new Set(["RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH"]);
 
@@ -196,10 +208,10 @@ async function upsertImplementationPayment(payment: AsaasPayment, link: PaymentL
   return "created" as const;
 }
 
-async function upsertPaymentRow(payment: AsaasPayment, link: PaymentLinkRow, customer: CustomerRow, subscription: SubscriptionRow) {
+async function upsertPaymentRow(payment: AsaasPayment, paymentLinkId: string | null, customer: CustomerRow, subscription: SubscriptionRow) {
   const body = {
     subscription_id: subscription.id,
-    payment_link_id: link.id,
+    payment_link_id: paymentLinkId,
     customer_id: customer.id,
     asaas_payment_id: payment.id,
     status: payment.status,
@@ -221,33 +233,113 @@ async function upsertPaymentRow(payment: AsaasPayment, link: PaymentLinkRow, cus
 }
 
 /**
- * Idempotently reflects a single Asaas payment (from a webhook delivery or a
- * manual `/payments?paymentLink=` sync) into customers/subscriptions/payments.
- * Shared by the webhook receiver and the manual sync route so both paths stay
- * in lockstep.
+ * Finds the subscription a `paymentLink`-less payment belongs to, so a
+ * client whose plan/value was edited directly in Asaas (not through one of
+ * our links) doesn't just vanish from their payment history.
  *
- * Strictly requires the payment to resolve to one of *our* generated
- * payment_links. The same Asaas account can carry unrelated activity (other
- * products, sandbox demo data, Asaas's own `paymentLink` query filter not
- * being fully reliable) — without this guard a sync/webhook could ingest
- * completely unrelated customers/payments into this CRM.
+ * Real case that surfaced this: a client signed up via a link (MONTHLY,
+ * R$597), and was later moved to a different Asaas subscription with a
+ * different value — apparently adjusted directly in Asaas, since every
+ * payment since then carries no `paymentLink` at all. Without this, only
+ * the first 3 payments (the original subscription) ever showed up for
+ * them; everything paid after the migration was silently dropped.
+ *
+ * Matches by the payment's own subscription/installment id first (an
+ * already-migrated subscription, on its 2nd+ payment). For the *first*
+ * payment of a brand-new id we have no direct match, so we fall back to
+ * "this customer's one subscription" — safe only when unambiguous (exactly
+ * one row, or exactly one ACTIVE one); otherwise we skip rather than guess.
+ */
+async function resolveOrphanSubscription(payment: AsaasPayment, customer: CustomerRow): Promise<SubscriptionFullRow | null> {
+  if (payment.subscription) {
+    const bySubscription = await findOne<SubscriptionFullRow>(
+      `/rest/v1/subscriptions?select=${SUBSCRIPTION_FULL_SELECT}&asaas_subscription_id=eq.${encodeURIComponent(payment.subscription)}`,
+    );
+    if (bySubscription) return bySubscription;
+  }
+  if (payment.installment) {
+    const byInstallment = await findOne<SubscriptionFullRow>(
+      `/rest/v1/subscriptions?select=${SUBSCRIPTION_FULL_SELECT}&asaas_installment_id=eq.${encodeURIComponent(payment.installment)}`,
+    );
+    if (byInstallment) return byInstallment;
+  }
+  const candidates = await supabaseRequest<SubscriptionFullRow[]>(
+    `/rest/v1/subscriptions?select=${SUBSCRIPTION_FULL_SELECT}&customer_id=eq.${customer.id}`,
+  );
+  if (candidates.length === 1) return candidates[0];
+  const active = candidates.filter((row) => row.status === "ACTIVE");
+  return active.length === 1 ? active[0] : null;
+}
+
+/**
+ * Points the subscription at this payment's (new) subscription/installment
+ * id and, for MONTHLY plans, adopts this payment's value as the new face
+ * value — once there's no link left to read a face value from, the paid
+ * amount is the only source of truth. Left untouched for ANNUAL plans:
+ * a single installment's value there is a fraction of the real annual
+ * total, so guessing would silently corrupt the MRR figure instead of just
+ * missing a payment; fix those manually via the customer's "Acompanhamento"
+ * timeline if a real value change happened.
+ */
+async function migrateOrphanSubscription(subscription: SubscriptionFullRow, payment: AsaasPayment): Promise<SubscriptionFullRow> {
+  const paid = PAID_STATUSES.has(payment.status);
+  const body: Record<string, unknown> = {};
+  if (payment.subscription && payment.subscription !== subscription.asaas_subscription_id) body.asaas_subscription_id = payment.subscription;
+  if (payment.installment && payment.installment !== subscription.asaas_installment_id) body.asaas_installment_id = payment.installment;
+  if (paid && subscription.billing_period === "MONTHLY" && payment.value !== subscription.value) body.value = payment.value;
+  if (paid && subscription.status !== "ACTIVE") body.status = "ACTIVE";
+  if (Object.keys(body).length === 0) return subscription;
+  const [updated] = await supabaseRequest<SubscriptionFullRow[]>(`/rest/v1/subscriptions?id=eq.${subscription.id}`, {
+    method: "PATCH",
+    prefer: "return=representation",
+    body,
+  });
+  return { ...subscription, ...updated };
+}
+
+/**
+ * Idempotently reflects a single Asaas payment (from a webhook delivery or a
+ * manual sync) into customers/subscriptions/payments. Shared by the webhook
+ * receiver and the manual sync route so both paths stay in lockstep.
+ *
+ * Requires the payment to resolve to either one of *our* generated
+ * payment_links, or (when there's no `paymentLink` at all) to a customer and
+ * subscription we already track — see `resolveOrphanSubscription`. The same
+ * Asaas account can carry unrelated activity (other products, sandbox demo
+ * data), so anything that can't be tied to something we already recognize is
+ * skipped rather than guessed at.
  */
 export async function syncAsaasPayment(payment: AsaasPayment) {
-  if (!payment.paymentLink) return { result: "skipped" as const, reason: "no paymentLink on this payment" };
-  const link = await resolvePaymentLink(payment.paymentLink);
-  if (!link) return { result: "skipped" as const, reason: `paymentLink ${payment.paymentLink} is not one of ours` };
+  if (payment.paymentLink) {
+    const link = await resolvePaymentLink(payment.paymentLink);
+    if (!link) return { result: "skipped" as const, reason: `paymentLink ${payment.paymentLink} is not one of ours` };
 
-  const customer = await resolveCustomer(payment, link);
-  if (!customer) return { result: "skipped" as const, reason: "E-mail do pagador não encontrado na aba ⭐ Base de Clientes; inclua-o lá para permitir a criação automática do cliente." };
+    const customer = await resolveCustomer(payment, link);
+    if (!customer) return { result: "skipped" as const, reason: "E-mail do pagador não encontrado na aba ⭐ Base de Clientes; inclua-o lá para permitir a criação automática do cliente." };
 
-  // Implantação (taxa única — API Oficial da Meta, Claude/IA, etc.): tem
-  // seu próprio ledger e nunca cria assinatura/MRR.
-  if (link.plan_kind === "IMPLEMENTATION") {
-    const result = await upsertImplementationPayment(payment, link, customer);
-    return { result, customerId: customer.id, subscriptionId: null, linkId: link.id, implementation: true as const };
+    // Implantação (taxa única — API Oficial da Meta, Claude/IA, etc.): tem
+    // seu próprio ledger e nunca cria assinatura/MRR.
+    if (link.plan_kind === "IMPLEMENTATION") {
+      const result = await upsertImplementationPayment(payment, link, customer);
+      return { result, customerId: customer.id, subscriptionId: null, linkId: link.id, implementation: true as const };
+    }
+
+    const subscription = await resolveSubscription(payment, link, customer);
+    const result = await upsertPaymentRow(payment, link.id, customer, subscription);
+    return { result, customerId: customer.id, subscriptionId: subscription.id, linkId: link.id };
   }
 
-  const subscription = await resolveSubscription(payment, link, customer);
-  const result = await upsertPaymentRow(payment, link, customer, subscription);
-  return { result, customerId: customer.id, subscriptionId: subscription.id, linkId: link.id };
+  // No paymentLink on this payment: only trust it if it clearly continues a
+  // customer/subscription we already track (see resolveOrphanSubscription).
+  const customer = await findOne<CustomerRow>(
+    `/rest/v1/customers?select=id,email,asaas_customer_id,acquisition_actor_id,status&asaas_customer_id=eq.${encodeURIComponent(payment.customer)}`,
+  );
+  if (!customer) return { result: "skipped" as const, reason: "no paymentLink and this Asaas customer isn't one of ours yet" };
+
+  const existingSubscription = await resolveOrphanSubscription(payment, customer);
+  if (!existingSubscription) return { result: "skipped" as const, reason: "no paymentLink and no existing subscription to attach this payment to" };
+
+  const subscription = await migrateOrphanSubscription(existingSubscription, payment);
+  const result = await upsertPaymentRow(payment, subscription.payment_link_id, customer, subscription);
+  return { result, customerId: customer.id, subscriptionId: subscription.id, linkId: subscription.payment_link_id };
 }

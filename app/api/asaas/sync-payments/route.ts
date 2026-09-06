@@ -81,7 +81,10 @@ export async function POST(request: Request) {
         const outcome = await syncAsaasPayment(payment);
         if (outcome.result === "skipped") { skipped += 1; continue; }
         synced += 1;
-        touchedLinkIds.add(outcome.linkId);
+        // Orphan payments (no paymentLink, migrated straight in Asaas — see
+        // lib/payment-sync.ts) can resolve to a subscription that itself
+        // has no payment_link_id; nothing to add to the touched-links count.
+        if (outcome.linkId) touchedLinkIds.add(outcome.linkId);
       }
       if (!page.hasMore) break;
       offset += page.data.length;

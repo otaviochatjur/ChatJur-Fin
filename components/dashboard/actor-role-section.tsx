@@ -9,17 +9,17 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge } from "@/components/dashboard/status-badge";
 import { ActorWorkspace } from "@/components/dashboard/actor-workspace";
-import { ColumnVisibilityMenu, useColumnVisibility, type ColumnDef } from "@/components/dashboard/table-toolbar";
+import { ColumnVisibilityMenu, ResizableTh, useColumnVisibility, useColumnWidths, type ColumnDef } from "@/components/dashboard/table-toolbar";
 import { actorCategoryLabel, money, type ActorMetrics, type CommercialActor, type Plan } from "@/lib/metrics";
 
 const actorStatusFilters = ["ALL", "ACTIVE", "INACTIVE"] as const;
 const actorStatusFilterLabels: Record<(typeof actorStatusFilters)[number], string> = { ALL: "Todos", ACTIVE: "Ativos", INACTIVE: "Inativos" };
 
 const actorRoleColumns: ColumnDef<"clients" | "mrr" | "links" | "status">[] = [
-  { key: "clients", label: "Clientes" },
-  { key: "mrr", label: "MRR" },
-  { key: "links", label: "Links" },
-  { key: "status", label: "Status" },
+  { key: "clients", label: "Clientes", defaultWidth: 110 },
+  { key: "mrr", label: "MRR", defaultWidth: 130 },
+  { key: "links", label: "Links", defaultWidth: 100 },
+  { key: "status", label: "Status", defaultWidth: 120 },
 ];
 
 /**
@@ -70,6 +70,7 @@ export function ActorRoleSection({
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<(typeof actorStatusFilters)[number]>("ALL");
   const columns = useColumnVisibility(actorRoleColumns);
+  const widths = useColumnWidths(actorRoleColumns);
 
   const term = search.trim().toLowerCase();
   const filtered = scoped
@@ -120,15 +121,15 @@ export function ActorRoleSection({
           <Input className="ml-auto w-56" placeholder="Buscar pelo nome" value={search} onChange={(event) => setSearch(event.target.value)} />
           <ColumnVisibilityMenu defs={actorRoleColumns} isVisible={columns.isVisible} toggle={columns.toggle} />
         </div>
-        <Table>
+        <Table className="table-fixed">
           <TableHeader>
             <TableRow>
-              <TableHead>{columnLabel}</TableHead>
-              {columns.isVisible("clients") && <TableHead className="text-right">Clientes</TableHead>}
-              {columns.isVisible("mrr") && <TableHead className="text-right">MRR</TableHead>}
-              {columns.isVisible("links") && <TableHead className="text-right">Links</TableHead>}
-              {columns.isVisible("status") && <TableHead>Status</TableHead>}
-              <TableHead />
+              <ResizableTh width={widths.getWidth("primary", 220)} onResizeStart={widths.startResize("primary", 220)}>{columnLabel}</ResizableTh>
+              {columns.isVisible("clients") && <ResizableTh width={widths.getWidth("clients")} onResizeStart={widths.startResize("clients")} className="text-right">Clientes</ResizableTh>}
+              {columns.isVisible("mrr") && <ResizableTh width={widths.getWidth("mrr")} onResizeStart={widths.startResize("mrr")} className="text-right">MRR</ResizableTh>}
+              {columns.isVisible("links") && <ResizableTh width={widths.getWidth("links")} onResizeStart={widths.startResize("links")} className="text-right">Links</ResizableTh>}
+              {columns.isVisible("status") && <ResizableTh width={widths.getWidth("status")} onResizeStart={widths.startResize("status")}>Status</ResizableTh>}
+              <TableHead className="w-14" />
             </TableRow>
           </TableHeader>
           <TableBody>

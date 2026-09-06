@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ColumnVisibilityMenu, useColumnVisibility, type ColumnDef } from "@/components/dashboard/table-toolbar";
+import { ColumnVisibilityMenu, ResizableTh, useColumnVisibility, useColumnWidths, type ColumnDef } from "@/components/dashboard/table-toolbar";
 import { money, type CommercialActor, type PaymentLink } from "@/lib/metrics";
 
 function addYears(iso: string, years: number) {
@@ -17,16 +17,17 @@ const urgencyFilters = ["ALL", "URGENT", "NORMAL"] as const;
 const urgencyFilterLabels: Record<(typeof urgencyFilters)[number], string> = { ALL: "Todas", URGENT: "Até 30 dias", NORMAL: "Mais de 30 dias" };
 
 const renewalColumns: ColumnDef<"plan" | "value" | "renewalDate" | "status">[] = [
-  { key: "plan", label: "Plano" },
-  { key: "value", label: "Valor" },
-  { key: "renewalDate", label: "Renovação estimada" },
-  { key: "status", label: "Situação" },
+  { key: "plan", label: "Plano", defaultWidth: 260 },
+  { key: "value", label: "Valor", defaultWidth: 130 },
+  { key: "renewalDate", label: "Renovação estimada", defaultWidth: 170 },
+  { key: "status", label: "Situação", defaultWidth: 130 },
 ];
 
 export function RenewalsSection({ links, actors }: { links: PaymentLink[]; actors: CommercialActor[] }) {
   const [actorFilter, setActorFilter] = useState("all");
   const [urgencyFilter, setUrgencyFilter] = useState<(typeof urgencyFilters)[number]>("ALL");
   const columns = useColumnVisibility(renewalColumns);
+  const widths = useColumnWidths(renewalColumns);
 
   const actorName = (id: string | null) => actors.find((actor) => actor.id === id)?.name ?? "—";
   // Wall-clock time only drives a display label (days remaining), not
@@ -68,14 +69,14 @@ export function RenewalsSection({ links, actors }: { links: PaymentLink[]; actor
         </Select>
         <ColumnVisibilityMenu defs={renewalColumns} isVisible={columns.isVisible} toggle={columns.toggle} />
       </div>
-      <Table>
+      <Table className="table-fixed">
         <TableHeader>
           <TableRow>
-            <TableHead>Responsável</TableHead>
-            {columns.isVisible("plan") && <TableHead>Plano</TableHead>}
-            {columns.isVisible("value") && <TableHead className="text-right">Valor</TableHead>}
-            {columns.isVisible("renewalDate") && <TableHead>Renovação estimada</TableHead>}
-            {columns.isVisible("status") && <TableHead>Situação</TableHead>}
+            <ResizableTh width={widths.getWidth("responsible", 190)} onResizeStart={widths.startResize("responsible", 190)}>Responsável</ResizableTh>
+            {columns.isVisible("plan") && <ResizableTh width={widths.getWidth("plan")} onResizeStart={widths.startResize("plan")}>Plano</ResizableTh>}
+            {columns.isVisible("value") && <ResizableTh width={widths.getWidth("value")} onResizeStart={widths.startResize("value")} className="text-right">Valor</ResizableTh>}
+            {columns.isVisible("renewalDate") && <ResizableTh width={widths.getWidth("renewalDate")} onResizeStart={widths.startResize("renewalDate")}>Renovação estimada</ResizableTh>}
+            {columns.isVisible("status") && <ResizableTh width={widths.getWidth("status")} onResizeStart={widths.startResize("status")}>Situação</ResizableTh>}
           </TableRow>
         </TableHeader>
         <TableBody>

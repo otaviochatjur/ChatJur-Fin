@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge } from "@/components/dashboard/status-badge";
-import { ColumnVisibilityMenu, useColumnVisibility, type ColumnDef } from "@/components/dashboard/table-toolbar";
+import { ColumnVisibilityMenu, ResizableTh, useColumnVisibility, useColumnWidths, type ColumnDef } from "@/components/dashboard/table-toolbar";
 import { money, planKindLabels, type CommercialActor, type PaymentLink, type Plan } from "@/lib/metrics";
 
 const linkFilters = ["ALL", "PENDING", "ACTIVE", "INACTIVE"] as const;
@@ -21,20 +21,20 @@ const planStatusFilters = ["ALL", "ACTIVE", "INACTIVE"] as const;
 const planStatusFilterLabels: Record<(typeof planStatusFilters)[number], string> = { ALL: "Todos", ACTIVE: "Ativos", INACTIVE: "Inativos" };
 
 const planColumns: ColumnDef<"kind" | "billingPeriod" | "value" | "installments" | "activeLinks" | "status">[] = [
-  { key: "kind", label: "Tipo" },
-  { key: "billingPeriod", label: "Periodicidade" },
-  { key: "value", label: "Preço padrão" },
-  { key: "installments", label: "Parcelamento" },
-  { key: "activeLinks", label: "Links ativos" },
-  { key: "status", label: "Status" },
+  { key: "kind", label: "Tipo", defaultWidth: 150 },
+  { key: "billingPeriod", label: "Periodicidade", defaultWidth: 130 },
+  { key: "value", label: "Preço padrão", defaultWidth: 130 },
+  { key: "installments", label: "Parcelamento", defaultWidth: 130 },
+  { key: "activeLinks", label: "Links ativos", defaultWidth: 110 },
+  { key: "status", label: "Status", defaultWidth: 110 },
 ];
 
 const linkColumns: ColumnDef<"actor" | "plan" | "value" | "source" | "status">[] = [
-  { key: "actor", label: "Ator" },
-  { key: "plan", label: "Plano" },
-  { key: "value", label: "Valor" },
-  { key: "source", label: "Origem" },
-  { key: "status", label: "Status" },
+  { key: "actor", label: "Ator", defaultWidth: 190 },
+  { key: "plan", label: "Plano", defaultWidth: 190 },
+  { key: "value", label: "Valor", defaultWidth: 130 },
+  { key: "source", label: "Origem", defaultWidth: 150 },
+  { key: "status", label: "Status", defaultWidth: 110 },
 ];
 
 export function PlansUsageSection({ links, actors, onChanged }: { links: PaymentLink[]; actors: CommercialActor[]; onChanged: () => void }) {
@@ -55,6 +55,7 @@ function PlansPanel({ links }: { links: PaymentLink[] }) {
   const [kindFilter, setKindFilter] = useState<(typeof planKindFilters)[number]>("ALL");
   const [statusFilter, setStatusFilter] = useState<(typeof planStatusFilters)[number]>("ALL");
   const columns = useColumnVisibility(planColumns);
+  const widths = useColumnWidths(planColumns);
 
   async function loadPlans() {
     // No setState before this first await: keeps this effect-safe per
@@ -171,17 +172,17 @@ function PlansPanel({ links }: { links: PaymentLink[] }) {
         ))}
         <ColumnVisibilityMenu defs={planColumns} isVisible={columns.isVisible} toggle={columns.toggle} />
       </div>
-      <Table>
+      <Table className="table-fixed">
         <TableHeader>
           <TableRow>
-            <TableHead>Plano</TableHead>
-            {columns.isVisible("kind") && <TableHead>Tipo</TableHead>}
-            {columns.isVisible("billingPeriod") && <TableHead>Periodicidade</TableHead>}
-            {columns.isVisible("value") && <TableHead className="text-right">Preço padrão</TableHead>}
-            {columns.isVisible("installments") && <TableHead>Parcelamento</TableHead>}
-            {columns.isVisible("activeLinks") && <TableHead className="text-right">Links ativos</TableHead>}
-            {columns.isVisible("status") && <TableHead>Status</TableHead>}
-            <TableHead />
+            <ResizableTh width={widths.getWidth("plan", 240)} onResizeStart={widths.startResize("plan", 240)}>Plano</ResizableTh>
+            {columns.isVisible("kind") && <ResizableTh width={widths.getWidth("kind")} onResizeStart={widths.startResize("kind")}>Tipo</ResizableTh>}
+            {columns.isVisible("billingPeriod") && <ResizableTh width={widths.getWidth("billingPeriod")} onResizeStart={widths.startResize("billingPeriod")}>Periodicidade</ResizableTh>}
+            {columns.isVisible("value") && <ResizableTh width={widths.getWidth("value")} onResizeStart={widths.startResize("value")} className="text-right">Preço padrão</ResizableTh>}
+            {columns.isVisible("installments") && <ResizableTh width={widths.getWidth("installments")} onResizeStart={widths.startResize("installments")}>Parcelamento</ResizableTh>}
+            {columns.isVisible("activeLinks") && <ResizableTh width={widths.getWidth("activeLinks")} onResizeStart={widths.startResize("activeLinks")} className="text-right">Links ativos</ResizableTh>}
+            {columns.isVisible("status") && <ResizableTh width={widths.getWidth("status")} onResizeStart={widths.startResize("status")}>Status</ResizableTh>}
+            <TableHead className="w-[132px]" />
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -263,6 +264,7 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
   const [search, setSearch] = useState("");
   const [syncing, setSyncing] = useState(false);
   const columns = useColumnVisibility(linkColumns);
+  const widths = useColumnWidths(linkColumns);
 
   useEffect(() => {
     fetch("/api/plans?status=all").then((response) => response.json()).then((data) => setPlans(data.plans ?? [])).catch(() => setPlans([]));
@@ -325,15 +327,15 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
         <Input className="ml-auto w-56" placeholder="Buscar pelo nome do link" value={search} onChange={(event) => setSearch(event.target.value)} />
         <ColumnVisibilityMenu defs={linkColumns} isVisible={columns.isVisible} toggle={columns.toggle} />
       </div>
-      <Table>
+      <Table className="table-fixed">
         <TableHeader>
           <TableRow>
-            <TableHead>Link</TableHead>
-            {columns.isVisible("actor") && <TableHead>Ator</TableHead>}
-            {columns.isVisible("plan") && <TableHead>Plano</TableHead>}
-            {columns.isVisible("value") && <TableHead className="text-right">Valor</TableHead>}
-            {columns.isVisible("source") && <TableHead>Origem</TableHead>}
-            {columns.isVisible("status") && <TableHead>Status</TableHead>}
+            <ResizableTh width={widths.getWidth("link", 260)} onResizeStart={widths.startResize("link", 260)}>Link</ResizableTh>
+            {columns.isVisible("actor") && <ResizableTh width={widths.getWidth("actor")} onResizeStart={widths.startResize("actor")}>Ator</ResizableTh>}
+            {columns.isVisible("plan") && <ResizableTh width={widths.getWidth("plan")} onResizeStart={widths.startResize("plan")}>Plano</ResizableTh>}
+            {columns.isVisible("value") && <ResizableTh width={widths.getWidth("value")} onResizeStart={widths.startResize("value")} className="text-right">Valor</ResizableTh>}
+            {columns.isVisible("source") && <ResizableTh width={widths.getWidth("source")} onResizeStart={widths.startResize("source")}>Origem</ResizableTh>}
+            {columns.isVisible("status") && <ResizableTh width={widths.getWidth("status")} onResizeStart={widths.startResize("status")}>Status</ResizableTh>}
           </TableRow>
         </TableHeader>
         <TableBody>

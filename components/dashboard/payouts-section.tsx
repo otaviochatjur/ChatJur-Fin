@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ColumnVisibilityMenu, useColumnVisibility, type ColumnDef } from "@/components/dashboard/table-toolbar";
+import { ColumnVisibilityMenu, ResizableTh, useColumnVisibility, useColumnWidths, type ColumnDef } from "@/components/dashboard/table-toolbar";
 import { downloadBrandedPdf, downloadBrandedXlsx, seededRandom } from "@/lib/reports";
 import {
   computeActorPayout,
@@ -33,9 +33,9 @@ const payoutStatusFilters = ["ALL", "PENDING", "PAID"] as const;
 const payoutStatusFilterLabels: Record<(typeof payoutStatusFilters)[number], string> = { ALL: "Todos", PENDING: "Pendentes", PAID: "Pagos" };
 
 const payoutColumns: ColumnDef<"received" | "commission" | "status">[] = [
-  { key: "received", label: "Recebido no período" },
-  { key: "commission", label: "Comissão calculada" },
-  { key: "status", label: "Status" },
+  { key: "received", label: "Recebido no período", defaultWidth: 170 },
+  { key: "commission", label: "Comissão calculada", defaultWidth: 170 },
+  { key: "status", label: "Status", defaultWidth: 220 },
 ];
 
 const rolePluralLabels: Record<(typeof ROLE_TABS)[number], string> = {
@@ -147,6 +147,7 @@ export function PayoutsSection({ actors, subscriptions, payments, customers }: {
   const [payoutStatusFilter, setPayoutStatusFilter] = useState<(typeof payoutStatusFilters)[number]>("ALL");
   const [nameSearch, setNameSearch] = useState("");
   const columns = useColumnVisibility(payoutColumns);
+  const widths = useColumnWidths(payoutColumns);
   const [reportFormat, setReportFormat] = useState<"pdf" | "xlsx">("pdf");
   const [demoMode, setDemoMode] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -421,15 +422,15 @@ export function PayoutsSection({ actors, subscriptions, payments, customers }: {
           <Input className="ml-auto w-56" placeholder="Buscar pelo nome" value={nameSearch} onChange={(event) => setNameSearch(event.target.value)} />
           <ColumnVisibilityMenu defs={payoutColumns} isVisible={columns.isVisible} toggle={columns.toggle} />
         </div>
-        <Table>
+        <Table className="table-fixed">
           <TableHeader>
             <TableRow>
               <TableHead className="w-10"><Checkbox checked={allVisibleSelected} onCheckedChange={toggleAllVisible} /></TableHead>
-              <TableHead>Nome</TableHead>
-              {columns.isVisible("received") && <TableHead className="text-right">Recebido no período</TableHead>}
-              {columns.isVisible("commission") && <TableHead className="text-right">Comissão calculada</TableHead>}
-              {columns.isVisible("status") && <TableHead>Status</TableHead>}
-              <TableHead />
+              <ResizableTh width={widths.getWidth("name", 220)} onResizeStart={widths.startResize("name", 220)}>Nome</ResizableTh>
+              {columns.isVisible("received") && <ResizableTh width={widths.getWidth("received")} onResizeStart={widths.startResize("received")} className="text-right">Recebido no período</ResizableTh>}
+              {columns.isVisible("commission") && <ResizableTh width={widths.getWidth("commission")} onResizeStart={widths.startResize("commission")} className="text-right">Comissão calculada</ResizableTh>}
+              {columns.isVisible("status") && <ResizableTh width={widths.getWidth("status")} onResizeStart={widths.startResize("status")}>Status</ResizableTh>}
+              <TableHead className="w-[300px]" />
             </TableRow>
           </TableHeader>
           <TableBody>
