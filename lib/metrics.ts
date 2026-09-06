@@ -56,11 +56,17 @@ export type Plan = {
   standard_value: number;
   annual_installment_limit: number | null;
   status: "ACTIVE" | "INACTIVE";
-  /** RECURRING = plano de assinatura (entra no MRR). IMPLEMENTATION = taxa única de implantação (API Oficial, Claude/IA, etc.) — pagamentos vão para `implementation_payments`, nunca criam assinatura. */
-  kind: "RECURRING" | "IMPLEMENTATION";
+  /** RECURRING = plano de assinatura (entra no MRR). IMPLEMENTATION = taxa única de implantação (API Oficial, Claude/IA, etc.). CONSULTING = taxa única de consultoria/assessoria avulsa. IMPLEMENTATION e CONSULTING nunca criam assinatura — pagamentos vão para `implementation_payments`. */
+  kind: "RECURRING" | "IMPLEMENTATION" | "CONSULTING";
 };
 
-export const planKindLabels: Record<Plan["kind"], string> = { RECURRING: "Plano recorrente", IMPLEMENTATION: "Implantação" };
+export const planKindLabels: Record<Plan["kind"], string> = { RECURRING: "Plano", IMPLEMENTATION: "Implantação", CONSULTING: "Consultoria" };
+
+/** Plan kinds that are always a one-time charge (`billing_period=ONE_TIME`) and never create a subscription/MRR — payments against them go to `implementation_payments` instead. See `lib/payment-sync.ts`. */
+export const oneTimePlanKinds = ["IMPLEMENTATION", "CONSULTING"] as const;
+export function isOneTimePlanKind(kind: Plan["kind"] | null | undefined): boolean {
+  return kind === "IMPLEMENTATION" || kind === "CONSULTING";
+}
 
 export type PriceVersion = {
   id: string;
@@ -195,10 +201,11 @@ export function isPaidStatus(status: string) {
 }
 
 /**
- * A payment made against an IMPLEMENTATION-kind plan/link (one-time setup
- * fee — API Oficial da Meta, integração Claude/IA, etc.). Kept fully
- * separate from `Payment`/`Subscription`: it never represents or feeds
- * MRR, it's just "cliente X pagou a implantação Y em tal data".
+ * A payment made against a one-time-kind plan/link — IMPLEMENTATION
+ * (setup fee: API Oficial da Meta, integração Claude/IA, etc.) or
+ * CONSULTING (assessoria/consultoria avulsa). Kept fully separate from
+ * `Payment`/`Subscription`: it never represents or feeds MRR, it's just
+ * "cliente X pagou a implantação/consultoria Y em tal data".
  */
 export type ImplementationPayment = {
   id: string;

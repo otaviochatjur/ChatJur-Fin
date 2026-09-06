@@ -1,5 +1,6 @@
 import { fetchAsaasCustomer, type AsaasCustomer, type AsaasPayment } from "@/lib/asaas";
 import { findClientInSheet } from "@/lib/clients-allowlist";
+import { isOneTimePlanKind, type Plan } from "@/lib/metrics";
 import { supabaseRequest } from "@/lib/supabase-server";
 
 type PaymentLinkRow = {
@@ -10,8 +11,8 @@ type PaymentLinkRow = {
   display_name: string;
   billing_period: "MONTHLY" | "ANNUAL" | "ONE_TIME";
   value: number;
-  /** Kind of the bound plan, if any — 'IMPLEMENTATION' routes the payment to `implementation_payments` instead of subscriptions/payments. Unbound links (plan_id null) behave like RECURRING, matching prior behavior. */
-  plan_kind: "RECURRING" | "IMPLEMENTATION" | null;
+  /** Kind of the bound plan, if any — IMPLEMENTATION/CONSULTING route the payment to `implementation_payments` instead of subscriptions/payments (see `isOneTimePlanKind`). Unbound links (plan_id null) behave like RECURRING, matching prior behavior. */
+  plan_kind: Plan["kind"] | null;
 };
 type CustomerRow = { id: string; email: string | null; asaas_customer_id: string | null; acquisition_actor_id: string | null; status: string };
 type SubscriptionRow = { id: string; status: string; asaas_subscription_id: string | null; asaas_installment_id: string | null };
@@ -35,7 +36,7 @@ async function findOne<T>(path: string): Promise<T | null> {
   return rows[0] ?? null;
 }
 
-type PaymentLinkRawRow = Omit<PaymentLinkRow, "plan_kind"> & { plans: { kind: "RECURRING" | "IMPLEMENTATION" } | null };
+type PaymentLinkRawRow = Omit<PaymentLinkRow, "plan_kind"> & { plans: { kind: Plan["kind"] } | null };
 
 async function resolvePaymentLink(asaasPaymentLinkId: string | null | undefined): Promise<PaymentLinkRow | null> {
   if (!asaasPaymentLinkId) return null;
@@ -188,10 +189,11 @@ async function resolveSubscription(payment: AsaasPayment, link: PaymentLinkRow, 
       plan_name_raw: link.display_name,
       payment_link_id: link.id,
       actor_id: link.actor_id,
-      // Only IMPLEMENTATION-kind links carry billing_period "ONE_TIME", and
-      // those are routed to `implementation_payments` before reaching this
-      // function (see `syncAsaasPayment`) — so this is always MONTHLY/ANNUAL
-      // here, matching `subscriptions.billing_period`'s check constraint.
+      // Only one-time-kind links (IMPLEMENTATION/CONSULTING) carry
+      // billing_period "ONE_TIME", and those are routed to
+      // `implementation_payments` before reaching this function (see
+      // `syncAsaasPayment`) — so this is always MONTHLY/ANNUAL here,
+      // matching `subscriptions.billing_period`'s check constraint.
       billing_period: link.billing_period as "MONTHLY" | "ANNUAL",
       // Use the link's face value, not this specific payment's value: for an
       // ANNUAL plan paid in N>1 installments, Asaas splits the total into N
@@ -211,10 +213,12 @@ async function resolveSubscription(payment: AsaasPayment, link: PaymentLinkRow, 
 }
 
 /**
- * Idempotently reflects a payment against an IMPLEMENTATION-kind plan/link
- * (one-time setup fee — API Oficial da Meta, integração Claude/IA, etc.)
- * into `implementation_payments`. Deliberately does NOT touch
- * subscriptions/payments: an implantação never represents or feeds MRR.
+ * Idempotently reflects a payment against a one-time-kind plan/link
+ * (IMPLEMENTATION — API Oficial da Meta, integração Claude/IA, etc. — or
+ * CONSULTING — assessoria/consultoria avulsa) into `implementation_payments`.
+ * Deliberately does NOT touch subscriptions/payments: neither of these
+ * represents or feeds MRR. `plan_id` on the row still tells the two apart
+ * via the linked plan's `kind`, if a report ever needs to split them.
  */
 async function upsertImplementationPayment(payment: AsaasPayment, link: PaymentLinkRow, customer: CustomerRow) {
   const body = {
@@ -371,9 +375,10 @@ export async function syncAsaasPayment(payment: AsaasPayment) {
     const customer = await resolveCustomer(payment, link);
     if (!customer) return { result: "skipped" as const, reason: "E-mail do pagador não encontrado na aba ⭐ Base de Clientes; inclua-o lá para permitir a criação automática do cliente." };
 
-    // Implantação (taxa única — API Oficial da Meta, Claude/IA, etc.): tem
-    // seu próprio ledger e nunca cria assinatura/MRR.
-    if (link.plan_kind === "IMPLEMENTATION") {
+    // Implantação (taxa única — API Oficial da Meta, Claude/IA, etc.) ou
+    // Consultoria (assessoria avulsa): ambas têm seu próprio ledger e nunca
+    // criam assinatura/MRR.
+    if (isOneTimePlanKind(link.plan_kind)) {
       const result = await upsertImplementationPayment(payment, link, customer);
       return { result, customerId: customer.id, subscriptionId: null, linkId: link.id, implementation: true as const };
     }

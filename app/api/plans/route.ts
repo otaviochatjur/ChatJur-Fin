@@ -1,3 +1,4 @@
+import { isOneTimePlanKind, type Plan } from "@/lib/metrics";
 import { supabaseRequest } from "@/lib/supabase-server";
 
 /**
@@ -26,7 +27,7 @@ type PlanPayload = {
   billingPeriod?: "MONTHLY" | "ANNUAL" | "ONE_TIME";
   standardValue?: number;
   annualInstallmentLimit?: number | null;
-  kind?: "RECURRING" | "IMPLEMENTATION";
+  kind?: Plan["kind"];
 };
 
 /** Manually registers a plan in the catalog, to then attach payment links to it. */
@@ -35,11 +36,11 @@ export async function POST(request: Request) {
     const payload = (await request.json()) as PlanPayload;
     if (!payload.code?.trim()) return Response.json({ error: "Informe o código do plano." }, { status: 400 });
     if (!payload.name?.trim()) return Response.json({ error: "Informe o nome do plano." }, { status: 400 });
-    const kind = payload.kind === "IMPLEMENTATION" ? "IMPLEMENTATION" : "RECURRING";
-    // Implantação é sempre taxa única — ignora o que veio no billingPeriod
-    // e força ONE_TIME, para nunca acabar com um produto de implantação
-    // marcado como recorrente por engano.
-    const billingPeriod = kind === "IMPLEMENTATION" ? "ONE_TIME" : payload.billingPeriod;
+    const kind: Plan["kind"] = payload.kind === "IMPLEMENTATION" ? "IMPLEMENTATION" : payload.kind === "CONSULTING" ? "CONSULTING" : "RECURRING";
+    // Implantação e consultoria são sempre taxa única — ignora o que veio
+    // no billingPeriod e força ONE_TIME, para nunca acabar com um desses
+    // produtos marcado como recorrente por engano.
+    const billingPeriod = isOneTimePlanKind(kind) ? "ONE_TIME" : payload.billingPeriod;
     if (billingPeriod !== "MONTHLY" && billingPeriod !== "ANNUAL" && billingPeriod !== "ONE_TIME") return Response.json({ error: "Periodicidade inválida." }, { status: 400 });
     const standardValue = Number(payload.standardValue);
     if (!Number.isFinite(standardValue) || standardValue <= 0) return Response.json({ error: "Informe um valor padrão válido." }, { status: 400 });
@@ -80,10 +81,10 @@ export async function PATCH(request: Request) {
       body.code = payload.code.trim().toUpperCase();
     }
     if (payload.kind !== undefined) {
-      if (payload.kind !== "RECURRING" && payload.kind !== "IMPLEMENTATION") return Response.json({ error: "Tipo inválido." }, { status: 400 });
+      if (payload.kind !== "RECURRING" && payload.kind !== "IMPLEMENTATION" && payload.kind !== "CONSULTING") return Response.json({ error: "Tipo inválido." }, { status: 400 });
       body.kind = payload.kind;
-      // Mantém a regra "implantação é sempre taxa única" mesmo em edições.
-      if (payload.kind === "IMPLEMENTATION") body.billing_period = "ONE_TIME";
+      // Mantém a regra "implantação/consultoria é sempre taxa única" mesmo em edições.
+      if (isOneTimePlanKind(payload.kind)) body.billing_period = "ONE_TIME";
     }
     if (payload.billingPeriod !== undefined && body.billing_period === undefined) {
       if (payload.billingPeriod !== "MONTHLY" && payload.billingPeriod !== "ANNUAL" && payload.billingPeriod !== "ONE_TIME") return Response.json({ error: "Periodicidade inválida." }, { status: 400 });

@@ -202,8 +202,8 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
       customPlanId: null,
       name: plan.name,
       // `plans` here is always pre-filtered to kind === "RECURRING" by the
-      // caller (app/page.tsx) — Implantação (kind IMPLEMENTATION, billing
-      // "ONE_TIME") never reaches this per-actor pricing/link table.
+      // caller (app/page.tsx) — Implantação/Consultoria (billing "ONE_TIME")
+      // never reach this per-actor pricing/link table.
       billingPeriod: plan.billing_period as BillingPeriod,
       value: priceFor(plan),
       maxInstallments: plan.billing_period === "ANNUAL" ? installmentsFor(plan) : null,

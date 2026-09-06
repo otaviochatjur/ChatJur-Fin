@@ -1,10 +1,13 @@
 import { supabaseRequest } from "@/lib/supabase-server";
 
 /**
- * Pagamentos de implantação (taxa única — API Oficial da Meta, Claude/IA,
- * etc.), escritos por `lib/payment-sync.ts` sempre que um pagamento chega
- * para um link vinculado a um plano `kind = 'IMPLEMENTATION'`. Nunca
- * aparecem em /api/payments nem em subscriptions — ledger próprio.
+ * Pagamentos de taxa única — implantação (API Oficial da Meta, Claude/IA,
+ * etc.) ou consultoria/assessoria avulsa —, escritos por
+ * `lib/payment-sync.ts` sempre que um pagamento chega para um link
+ * vinculado a um plano `kind = 'IMPLEMENTATION'` ou `'CONSULTING'`. Nunca
+ * aparecem em /api/payments nem em subscriptions — ledger próprio. O
+ * `plan_id` de cada linha permite distinguir implantação de consultoria
+ * via o `kind` do plano vinculado.
  */
 export async function GET(request: Request) {
   try {

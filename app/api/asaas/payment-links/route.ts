@@ -1,4 +1,4 @@
-import { isPaidStatus } from "@/lib/metrics";
+import { isOneTimePlanKind, isPaidStatus, type Plan } from "@/lib/metrics";
 import { supabaseRequest } from "@/lib/supabase-server";
 
 type PaymentLinkRequest = { partnerId?: string; partnerName?: string; planId?: string; customPlanId?: string; planName?: string; billingPeriod?: "MONTHLY" | "ANNUAL"; priceVersion?: string; priceVersionId?: string; value?: number; maxInstallments?: number };
@@ -105,13 +105,14 @@ export async function PATCH(request: Request) {
     if (payload.actorId !== undefined) body.actor_id = payload.actorId || null;
     if (payload.planId !== undefined) {
       body.plan_id = payload.planId || null;
-      // Vinculando a um plano de Implantação: o link passa a representar uma
-      // taxa única, não mais um plano recorrente — cascateia billing_period
-      // para ONE_TIME, o mesmo sinal que lib/payment-sync.ts usa para rotear
-      // o pagamento para implementation_payments em vez de subscriptions.
+      // Vinculando a um plano de Implantação ou Consultoria: o link passa a
+      // representar uma taxa única, não mais um plano recorrente — cascateia
+      // billing_period para ONE_TIME, o mesmo sinal que lib/payment-sync.ts
+      // usa para rotear o pagamento para implementation_payments em vez de
+      // subscriptions.
       if (payload.planId) {
-        const [plan] = await supabaseRequest<{ kind: string }[]>(`/rest/v1/plans?id=eq.${encodeURIComponent(payload.planId)}&select=kind`);
-        if (plan?.kind === "IMPLEMENTATION") body.billing_period = "ONE_TIME";
+        const [plan] = await supabaseRequest<{ kind: Plan["kind"] }[]>(`/rest/v1/plans?id=eq.${encodeURIComponent(payload.planId)}&select=kind`);
+        if (isOneTimePlanKind(plan?.kind)) body.billing_period = "ONE_TIME";
       }
     }
 
