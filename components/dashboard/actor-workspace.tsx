@@ -435,7 +435,7 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
   return (
     <>
       <div className="flex items-start justify-between gap-3">
-        <div><p className="text-xs font-medium uppercase tracking-[0.14em] text-[#3b82f6]">{actorCategoryLabel(actor)} selecionado</p><h2 className="mt-2 text-lg font-semibold">{actor.name}</h2><p className="text-sm text-slate-500">Tabela própria e links Asaas</p></div>
+        <div><p className="text-xs font-medium uppercase tracking-[0.14em] text-[#3b82f6]">{actorCategoryLabel(actor)} selecionado</p><h2 className="mt-2 text-lg font-semibold">{actor.name}</h2><p className="text-sm text-slate-500 dark:text-muted-foreground">Tabela própria e links Asaas</p></div>
         <Button variant="ghost" size="icon"><MoreHorizontal className="size-4" /></Button>
       </div>
       <Tabs defaultValue="data" className="mt-5">
@@ -450,7 +450,7 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
           {connectRoles.includes(actor.role as typeof connectRoles[number]) && (
             <div className="space-y-2 rounded-xl border border-[#3b82f6]/30 bg-[#eef4fd] p-3">
               <div className="flex items-center justify-between gap-2">
-                <div><p className="text-sm font-medium">Categoria no Connect</p><p className="text-xs text-slate-500">Reclassifique entre Parceiro, Embaixador e Institucional a qualquer momento. Não altera taxas de repasse já configuradas por plano — a taxa padrão da categoria pode ser restaurada na aba Comissão.</p></div>
+                <div><p className="text-sm font-medium">Categoria no Connect</p><p className="text-xs text-slate-500 dark:text-muted-foreground">Reclassifique entre Parceiro, Embaixador e Institucional a qualquer momento. Não altera taxas de repasse já configuradas por plano — a taxa padrão da categoria pode ser restaurada na aba Comissão.</p></div>
                 <Select value={profileRole} onValueChange={(value) => setProfileRole(value as CommercialActor["role"])}>
                   <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -458,13 +458,13 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
                   </SelectContent>
                 </Select>
               </div>
-              {profileRole !== actor.role && <p className="text-xs font-medium text-amber-600">Categoria será alterada para {roleLabels[profileRole]} ao salvar.</p>}
+              {profileRole !== actor.role && <p className="text-xs font-medium text-amber-600 dark:text-amber-300">Categoria será alterada para {roleLabels[profileRole]} ao salvar.</p>}
             </div>
           )}
           {profileRole === "PARTNER" && (
             <div className="space-y-2 rounded-xl border border-[#3b82f6]/30 bg-[#eef4fd] p-3">
               <div className="flex items-center justify-between gap-2">
-                <div><p className="text-sm font-medium">Tier do parceiro</p><p className="text-xs text-slate-500">Plus dá 15% de repasse em vez de 10% — critério sugerido: {CONNECT_PLUS_ELIGIBILITY_CLIENTS}+ planos vendidos e ativos. Promoção é manual.</p></div>
+                <div><p className="text-sm font-medium">Tier do parceiro</p><p className="text-xs text-slate-500 dark:text-muted-foreground">Plus dá 15% de repasse em vez de 10% — critério sugerido: {CONNECT_PLUS_ELIGIBILITY_CLIENTS}+ planos vendidos e ativos. Promoção é manual.</p></div>
                 <Select value={profileTier} onValueChange={(value) => setProfileTier(value as "STANDARD" | "PLUS")}>
                   <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -474,12 +474,12 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
                 </Select>
               </div>
               {metrics.clients >= CONNECT_PLUS_ELIGIBILITY_CLIENTS && profileTier === "STANDARD" && (
-                <p className="text-xs font-medium text-[#3a5d9d]">Elegível para Plus: {metrics.clients} clientes ativos.</p>
+                <p className="text-xs font-medium text-primary">Elegível para Plus: {metrics.clients} clientes ativos.</p>
               )}
             </div>
           )}
           <div className="space-y-3">
-            <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">Dados pessoais</p>
+            <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500 dark:text-muted-foreground">Dados pessoais</p>
             <div className="grid grid-cols-2 gap-3">
               <Input value={profileEmail} onChange={(event) => setProfileEmail(event.target.value)} placeholder="E-mail" type="email" />
               <Input value={profilePhone} onChange={(event) => setProfilePhone(event.target.value)} placeholder="Telefone" />
@@ -487,8 +487,8 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
             <Input value={profileDocument} onChange={(event) => setProfileDocument(event.target.value)} placeholder="CPF ou CNPJ" />
             <Input value={profileNotes} onChange={(event) => setProfileNotes(event.target.value)} placeholder="Observações" />
           </div>
-          <div className="space-y-3 border-t border-dashed border-slate-200 pt-3">
-            <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">Redes sociais</p>
+          <div className="space-y-3 border-t border-dashed border-slate-200 dark:border-border pt-3">
+            <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500 dark:text-muted-foreground">Redes sociais</p>
             <div className="grid grid-cols-2 gap-3">
               <Input value={profileInstagram} onChange={(event) => setProfileInstagram(event.target.value)} placeholder="Instagram" />
               <Input value={profileLinkedin} onChange={(event) => setProfileLinkedin(event.target.value)} placeholder="LinkedIn" />
@@ -498,8 +498,8 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
               <Input value={profileWebsite} onChange={(event) => setProfileWebsite(event.target.value)} placeholder="Site / blog" />
             </div>
           </div>
-          <div className="space-y-3 border-t border-dashed border-slate-200 pt-3">
-            <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">Dados bancários — para o repasse</p>
+          <div className="space-y-3 border-t border-dashed border-slate-200 dark:border-border pt-3">
+            <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500 dark:text-muted-foreground">Dados bancários — para o repasse</p>
             <Input value={profilePixKey} onChange={(event) => setProfilePixKey(event.target.value)} placeholder="Chave Pix" />
             <div className="grid grid-cols-2 gap-3">
               <Input value={profileBankName} onChange={(event) => setProfileBankName(event.target.value)} placeholder="Banco" />
@@ -522,28 +522,28 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
         </TabsContent>
         <TabsContent value="prices" className="mt-4 space-y-3">
           {plans.map((plan) => (
-            <div key={plan.id} className="rounded-xl border border-slate-200 p-3">
+            <div key={plan.id} className="rounded-xl border border-slate-200 dark:border-border p-3">
               <div className="flex items-center justify-between gap-2">
-                <div><p className="text-sm font-medium">{plan.name}</p><p className="text-xs text-slate-500">{plan.billing_period === "ANNUAL" ? "Anual · contrato de 12 meses" : "Mensal"}</p></div>
+                <div><p className="text-sm font-medium">{plan.name}</p><p className="text-xs text-slate-500 dark:text-muted-foreground">{plan.billing_period === "ANNUAL" ? "Anual · contrato de 12 meses" : "Mensal"}</p></div>
                 <Badge variant="outline">Tabela: {money.format(plan.standard_value ?? 0)}</Badge>
               </div>
               <div className="mt-3 flex items-center gap-2">
-                <span className="text-sm text-slate-500">R$</span>
+                <span className="text-sm text-slate-500 dark:text-muted-foreground">R$</span>
                 <Input type="number" step="0.01" value={prices[plan.id] ?? ""} onChange={(event) => setPrices((current) => ({ ...current, [plan.id]: event.target.value }))} />
                 {plan.billing_period === "ANNUAL" && (
                   <div className="flex shrink-0 items-center gap-1.5">
-                    <span className="whitespace-nowrap text-xs text-slate-500">até</span>
+                    <span className="whitespace-nowrap text-xs text-slate-500 dark:text-muted-foreground">até</span>
                     <Input type="number" min={MIN_INSTALLMENTS} max={MAX_INSTALLMENTS} className="w-16 px-2 text-center" value={installments[plan.id] ?? "6"} onChange={(event) => setInstallments((current) => ({ ...current, [plan.id]: event.target.value }))} />
-                    <span className="whitespace-nowrap text-xs text-slate-500">x</span>
+                    <span className="whitespace-nowrap text-xs text-slate-500 dark:text-muted-foreground">x</span>
                   </div>
                 )}
               </div>
             </div>
           ))}
 
-          <div className="space-y-2 border-t border-dashed border-slate-200 pt-3">
+          <div className="space-y-2 border-t border-dashed border-slate-200 dark:border-border pt-3">
             <div className="flex items-center justify-between gap-2">
-              <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">Planos personalizados</p>
+              <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500 dark:text-muted-foreground">Planos personalizados</p>
               <Dialog open={customDialog} onOpenChange={setCustomDialog}>
                 <DialogTrigger asChild><Button variant="outline" size="sm"><Plus className="size-3.5" />Adicionar plano</Button></DialogTrigger>
                 <DialogContent>
@@ -555,14 +555,14 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
                       <SelectContent><SelectItem value="MONTHLY">Mensal</SelectItem><SelectItem value="ANNUAL">Anual</SelectItem></SelectContent>
                     </Select>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm text-slate-500">R$</span>
+                      <span className="text-sm text-slate-500 dark:text-muted-foreground">R$</span>
                       <Input type="number" step="0.01" value={customValue} onChange={(event) => setCustomValue(event.target.value)} placeholder="Valor" />
                     </div>
                     {customBillingPeriod === "ANNUAL" && (
                       <div className="flex items-center gap-1.5">
-                        <span className="text-xs text-slate-500">Parcelamento até</span>
+                        <span className="text-xs text-slate-500 dark:text-muted-foreground">Parcelamento até</span>
                         <Input type="number" min={MIN_INSTALLMENTS} max={MAX_INSTALLMENTS} className="w-16 px-2 text-center" value={customInstallments} onChange={(event) => setCustomInstallments(event.target.value)} />
-                        <span className="text-xs text-slate-500">x</span>
+                        <span className="text-xs text-slate-500 dark:text-muted-foreground">x</span>
                       </div>
                     )}
                   </div>
@@ -570,24 +570,24 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
                 </DialogContent>
               </Dialog>
             </div>
-            {customPlans.length === 0 && <p className="text-sm text-slate-500">Nenhum plano personalizado para {actor.name}.</p>}
+            {customPlans.length === 0 && <p className="text-sm text-slate-500 dark:text-muted-foreground">Nenhum plano personalizado para {actor.name}.</p>}
             {customPlans.map((item) => (
-              <div key={item.id} className="rounded-xl border border-dashed border-slate-200 p-3">
+              <div key={item.id} className="rounded-xl border border-dashed border-slate-200 dark:border-border p-3">
                 <div className="flex items-center justify-between gap-2">
-                  <div><p className="text-sm font-medium">{item.name}</p><p className="text-xs text-slate-500">{item.billing_period === "ANNUAL" ? "Anual · contrato de 12 meses" : "Mensal"}</p></div>
+                  <div><p className="text-sm font-medium">{item.name}</p><p className="text-xs text-slate-500 dark:text-muted-foreground">{item.billing_period === "ANNUAL" ? "Anual · contrato de 12 meses" : "Mensal"}</p></div>
                   <div className="flex items-center gap-1">
                     <Badge variant="outline" className="border-[#3b82f6]/30 text-[#3b82f6]">Personalizado</Badge>
                     <Button variant="ghost" size="icon" onClick={() => removeCustomPlan(item.id)}><Trash2 className="size-4" /><span className="sr-only">Remover plano</span></Button>
                   </div>
                 </div>
                 <div className="mt-3 flex items-center gap-2">
-                  <span className="text-sm text-slate-500">R$</span>
+                  <span className="text-sm text-slate-500 dark:text-muted-foreground">R$</span>
                   <Input type="number" step="0.01" value={customEdits[item.id]?.value ?? String(item.value)} onChange={(event) => setCustomEdits((current) => ({ ...current, [item.id]: { value: event.target.value, maxInstallments: current[item.id]?.maxInstallments ?? String(item.max_installments ?? 6) } }))} />
                   {item.billing_period === "ANNUAL" && (
                     <div className="flex shrink-0 items-center gap-1.5">
-                      <span className="whitespace-nowrap text-xs text-slate-500">até</span>
+                      <span className="whitespace-nowrap text-xs text-slate-500 dark:text-muted-foreground">até</span>
                       <Input type="number" min={MIN_INSTALLMENTS} max={MAX_INSTALLMENTS} className="w-16 px-2 text-center" value={customEdits[item.id]?.maxInstallments ?? String(item.max_installments ?? 6)} onChange={(event) => setCustomEdits((current) => ({ ...current, [item.id]: { value: current[item.id]?.value ?? String(item.value), maxInstallments: event.target.value } }))} />
-                      <span className="whitespace-nowrap text-xs text-slate-500">x</span>
+                      <span className="whitespace-nowrap text-xs text-slate-500 dark:text-muted-foreground">x</span>
                     </div>
                   )}
                 </div>
@@ -596,7 +596,7 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
           </div>
 
           <div className="flex items-center justify-between gap-3 pt-1">
-            <p className="text-xs text-slate-500">{priceVersions.find((version) => version.effective_until === null) ? `Vigente desde ${new Date(priceVersions.find((version) => version.effective_until === null)!.effective_from).toLocaleDateString("pt-BR")}` : "Usando tabela padrão dos planos"}</p>
+            <p className="text-xs text-slate-500 dark:text-muted-foreground">{priceVersions.find((version) => version.effective_until === null) ? `Vigente desde ${new Date(priceVersions.find((version) => version.effective_until === null)!.effective_from).toLocaleDateString("pt-BR")}` : "Usando tabela padrão dos planos"}</p>
             <Button disabled={savingPrices} onClick={savePrices} variant="outline">{savingPrices ? "Salvando…" : "Salvar alterações"}</Button>
           </div>
         </TabsContent>
@@ -604,23 +604,23 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
           {links.length > 0 && (
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
-                <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">Links gerados</p>
+                <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500 dark:text-muted-foreground">Links gerados</p>
                 <div className="flex items-center gap-1">
                   <Button variant="ghost" size="sm" disabled={syncingPayments} onClick={syncPayments} className="h-7 gap-1.5 text-xs text-[#3b82f6]">
                     <RefreshCw className={`size-3.5 ${syncingPayments ? "animate-spin" : ""}`} />{syncingPayments ? "Sincronizando…" : "Sincronizar pagamentos"}
                   </Button>
                   {links.some((link) => link.status === "ACTIVE") && (
-                    <Button variant="ghost" size="sm" disabled={deactivatingLinks} onClick={deactivateAllLinks} className="h-7 gap-1.5 text-xs text-red-600 hover:text-red-700">
+                    <Button variant="ghost" size="sm" disabled={deactivatingLinks} onClick={deactivateAllLinks} className="h-7 gap-1.5 text-xs text-red-600 dark:text-red-300 hover:text-red-700 dark:hover:text-red-300">
                       <Link2Off className="size-3.5" />{deactivatingLinks ? "Desativando…" : "Desativar todos os links"}
                     </Button>
                   )}
                 </div>
               </div>
               {links.map((link) => (
-                <div key={link.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 p-3">
+                <div key={link.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 dark:border-border p-3">
                   <div>
                     <p className="text-sm font-medium">{link.display_name}</p>
-                    <p className="text-xs text-slate-500">{link.billing_period === "ANNUAL" ? "Anual" : "Mensal"} · {money.format(link.value)}{link.billing_period === "ANNUAL" && link.max_installments ? ` · até ${link.max_installments}x` : ""}</p>
+                    <p className="text-xs text-slate-500 dark:text-muted-foreground">{link.billing_period === "ANNUAL" ? "Anual" : "Mensal"} · {money.format(link.value)}{link.billing_period === "ANNUAL" && link.max_installments ? ` · até ${link.max_installments}x` : ""}</p>
                     <p className="mt-1 text-xs font-medium text-[#3b82f6]">
                       {link.active_subscribers ?? 0} assinatura(s) ativa(s) · {money.format(link.total_received ?? 0)} recebido(s)
                     </p>
@@ -632,68 +632,68 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
           )}
 
           {pendingCandidates.length > 0 ? (
-            <div className="space-y-3 rounded-xl border border-slate-200 p-3">
+            <div className="space-y-3 rounded-xl border border-slate-200 dark:border-border p-3">
               <div className="flex items-center justify-between gap-2">
                 <label className="flex items-center gap-2 text-sm font-medium">
                   <Checkbox checked={allSelected} onCheckedChange={toggleAll} />
                   Selecionar todos os planos
                 </label>
-                <span className="text-xs text-slate-500">{selectedCandidates.length} de {pendingCandidates.length} selecionado(s)</span>
+                <span className="text-xs text-slate-500 dark:text-muted-foreground">{selectedCandidates.length} de {pendingCandidates.length} selecionado(s)</span>
               </div>
               <div className="space-y-2">
                 {pendingCandidates.map((candidate) => (
-                  <label key={candidate.key} className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 p-2.5 hover:bg-slate-50">
+                  <label key={candidate.key} className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 dark:border-border p-2.5 hover:bg-slate-50 dark:hover:bg-muted">
                     <span className="flex items-center gap-2.5">
                       <Checkbox checked={!deselectedKeys.has(candidate.key)} onCheckedChange={(checked) => toggleCandidate(candidate.key, checked === true)} />
                       <span>
                         <p className="text-sm font-medium">{candidate.name}{candidate.customPlanId && <span className="ml-1.5 text-[10px] font-medium uppercase tracking-wide text-[#3b82f6]">personalizado</span>}</p>
-                        <p className="text-xs text-slate-500">{candidate.billingPeriod === "ANNUAL" ? `Anual · até ${candidate.maxInstallments}x` : "Mensal"}</p>
+                        <p className="text-xs text-slate-500 dark:text-muted-foreground">{candidate.billingPeriod === "ANNUAL" ? `Anual · até ${candidate.maxInstallments}x` : "Mensal"}</p>
                       </span>
                     </span>
                     <span className="text-sm font-medium">{money.format(candidate.value)}</span>
                   </label>
                 ))}
               </div>
-              {linkStatus && <p role="alert" className="text-sm text-red-600">{linkStatus}</p>}
+              {linkStatus && <p role="alert" className="text-sm text-red-600 dark:text-red-300">{linkStatus}</p>}
               <Button className="w-full bg-[#3a5d9d] text-white hover:bg-[#2c4a80]" disabled={creatingLinks || selectedCandidates.length === 0} onClick={generateSelectedLinks}>
                 <Link2 className="size-4" />{creatingLinks ? "Gerando…" : `Gerar ${selectedCandidates.length || ""} link${selectedCandidates.length === 1 ? "" : "s"} no Asaas`}
               </Button>
             </div>
           ) : links.length > 0 ? (
-            <p className="text-sm text-slate-500">Todos os planos já têm link gerado.</p>
+            <p className="text-sm text-slate-500 dark:text-muted-foreground">Todos os planos já têm link gerado.</p>
           ) : (
-            <p className="text-sm text-slate-500">Nenhum plano disponível para gerar link.</p>
+            <p className="text-sm text-slate-500 dark:text-muted-foreground">Nenhum plano disponível para gerar link.</p>
           )}
         </TabsContent>
         {canEarnCommission && (
           <TabsContent value="commission" className="mt-4 space-y-3">
-            <p className="text-xs text-slate-500">Taxa de repasse sobre o MRR do plano. Anual: distribuída pelos 12 meses do ciclo enquanto a assinatura estiver ativa (não importa se foi pago em 1x, 8x ou 12x). Mensal: só no mês do pagamento. Deixe um plano em branco para usar a taxa padrão.</p>
+            <p className="text-xs text-slate-500 dark:text-muted-foreground">Taxa de repasse sobre o MRR do plano. Anual: distribuída pelos 12 meses do ciclo enquanto a assinatura estiver ativa (não importa se foi pago em 1x, 8x ou 12x). Mensal: só no mês do pagamento. Deixe um plano em branco para usar a taxa padrão.</p>
             <div className="rounded-xl border border-[#3b82f6]/30 bg-[#eef4fd] p-3">
               <div className="flex items-center justify-between gap-2">
-                <div><p className="text-sm font-medium">Taxa padrão</p><p className="text-xs text-slate-500">Usada quando o plano vendido não tem taxa específica</p></div>
+                <div><p className="text-sm font-medium">Taxa padrão</p><p className="text-xs text-slate-500 dark:text-muted-foreground">Usada quando o plano vendido não tem taxa específica</p></div>
                 <div className="flex items-center gap-1.5">
                   <Input type="number" step="0.1" min={0} max={100} className="w-20 text-right" placeholder="0" value={commissionEdits.default ?? ""} onChange={(event) => setCommissionEdits((current) => ({ ...current, default: event.target.value }))} />
-                  <span className="text-sm text-slate-500">%</span>
+                  <span className="text-sm text-slate-500 dark:text-muted-foreground">%</span>
                 </div>
               </div>
               {connectDefaultRatePercent(actor.role, actor.tier) !== null && (
-                <Button variant="link" size="sm" className="h-auto px-0 text-xs text-[#3a5d9d]" onClick={applyDefaultCommissionRate}>
+                <Button variant="link" size="sm" className="h-auto px-0 text-xs text-primary" onClick={applyDefaultCommissionRate}>
                   Usar taxa padrão da categoria ({connectDefaultRatePercent(actor.role, actor.tier)}%)
                 </Button>
               )}
             </div>
             <div className="space-y-2">
-              <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">Taxa por plano (opcional)</p>
+              <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500 dark:text-muted-foreground">Taxa por plano (opcional)</p>
               {candidates.map((item) => (
-                <div key={item.key} className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 p-2.5">
-                  <div><p className="text-sm font-medium">{item.name}</p><p className="text-xs text-slate-500">{item.billingPeriod === "ANNUAL" ? "Anual" : "Mensal"} · {money.format(item.value)}</p></div>
+                <div key={item.key} className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 dark:border-border p-2.5">
+                  <div><p className="text-sm font-medium">{item.name}</p><p className="text-xs text-slate-500 dark:text-muted-foreground">{item.billingPeriod === "ANNUAL" ? "Anual" : "Mensal"} · {money.format(item.value)}</p></div>
                   <div className="flex items-center gap-1.5">
                     <Input type="number" step="0.1" min={0} max={100} className="w-20 text-right" placeholder="padrão" value={commissionEdits[item.key] ?? ""} onChange={(event) => setCommissionEdits((current) => ({ ...current, [item.key]: event.target.value }))} />
-                    <span className="text-sm text-slate-500">%</span>
+                    <span className="text-sm text-slate-500 dark:text-muted-foreground">%</span>
                   </div>
                 </div>
               ))}
-              {candidates.length === 0 && <p className="text-sm text-slate-500">Nenhum plano cadastrado ainda.</p>}
+              {candidates.length === 0 && <p className="text-sm text-slate-500 dark:text-muted-foreground">Nenhum plano cadastrado ainda.</p>}
             </div>
             <div className="flex justify-end pt-1">
               <Button disabled={savingCommission} onClick={saveCommissionRates} variant="outline">{savingCommission ? "Salvando…" : "Salvar taxas de comissão"}</Button>
@@ -702,8 +702,8 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
         )}
         <TabsContent value="performance" className="mt-4">
           <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-xl bg-slate-50 p-4"><p className="text-xs text-slate-500">Clientes</p><p className="mt-1 text-xl font-semibold">{metrics.clients}</p></div>
-            <div className="rounded-xl bg-slate-50 p-4"><p className="text-xs text-slate-500">MRR</p><p className="mt-1 text-xl font-semibold">{money.format(metrics.mrr)}</p></div>
+            <div className="rounded-xl bg-slate-50 dark:bg-muted p-4"><p className="text-xs text-slate-500 dark:text-muted-foreground">Clientes</p><p className="mt-1 text-xl font-semibold">{metrics.clients}</p></div>
+            <div className="rounded-xl bg-slate-50 dark:bg-muted p-4"><p className="text-xs text-slate-500 dark:text-muted-foreground">MRR</p><p className="mt-1 text-xl font-semibold">{money.format(metrics.mrr)}</p></div>
           </div>
         </TabsContent>
       </Tabs>

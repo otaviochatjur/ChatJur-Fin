@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge } from "@/components/dashboard/status-badge";
-import { ColumnVisibilityMenu, ResizableTh, useColumnVisibility, useColumnWidths, type ColumnDef } from "@/components/dashboard/table-toolbar";
+import { ColumnVisibilityMenu, ResizableTh, useTableSort, useColumnVisibility, useColumnWidths, type ColumnDef } from "@/components/dashboard/table-toolbar";
 import { isOneTimePlanKind, money, planBadgeClass, planKindLabels, type CommercialActor, type PaymentLink, type Plan } from "@/lib/metrics";
 
 const linkFilters = ["ALL", "PENDING", "ACTIVE", "INACTIVE"] as const;
@@ -79,6 +79,7 @@ function PlansPanel({ links, onChanged }: { links: PaymentLink[]; onChanged: () 
   const [statusFilter, setStatusFilter] = useState<(typeof planStatusFilters)[number]>("ALL");
   const columns = useColumnVisibility(planColumns);
   const widths = useColumnWidths(planColumns);
+  const sorting = useTableSort();
 
   async function loadPlans() {
     // No setState before this first await: keeps this effect-safe per
@@ -153,12 +154,12 @@ function PlansPanel({ links, onChanged }: { links: PaymentLink[]; onChanged: () 
   }
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.04)]">
-      <div className="border-b border-slate-100 p-5">
+    <section className="rounded-2xl border border-slate-200 dark:border-border bg-white dark:bg-card shadow-[0_10px_30px_rgba(15,23,42,0.04)]">
+      <div className="border-b border-slate-100 dark:border-border p-5">
         <h2 className="font-semibold">Catálogo de planos</h2>
-        <p className="mt-1 text-sm text-slate-500">Cadastre aqui os planos existentes para depois vincular os links de pagamento a eles.</p>
+        <p className="mt-1 text-sm text-slate-500 dark:text-muted-foreground">Cadastre aqui os planos existentes para depois vincular os links de pagamento a eles.</p>
       </div>
-      <div className="flex flex-wrap items-end gap-2 border-b border-slate-100 p-4">
+      <div className="flex flex-wrap items-end gap-2 border-b border-slate-100 dark:border-border p-4">
         <Input className="w-28" placeholder="Código" value={form.code} onChange={(event) => setForm((current) => ({ ...current, code: event.target.value }))} />
         <Input className="flex-1 min-w-[180px]" placeholder="Nome do plano" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} />
         <Select value={form.kind} onValueChange={(value) => setForm((current) => ({ ...current, kind: value as Plan["kind"] }))}>
@@ -182,15 +183,15 @@ function PlansPanel({ links, onChanged }: { links: PaymentLink[]; onChanged: () 
         {showInstallments && <Input className="w-24" type="number" min="1" max="12" placeholder="Até Nx" value={form.annualInstallmentLimit} onChange={(event) => setForm((current) => ({ ...current, annualInstallmentLimit: event.target.value }))} />}
         <Button disabled={creating || !form.code.trim() || !form.name.trim() || (!isOneTimePlanKind(form.kind) && !(Number(form.standardValue) > 0))} onClick={createPlan} className="bg-[#3a5d9d] text-white hover:bg-[#2c4a80]">{creating ? "Criando…" : "+ Novo plano"}</Button>
       </div>
-      <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 p-4">
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 dark:border-border p-4">
         {planKindFilters.map((value) => (
-          <button key={value} onClick={() => setKindFilter(value)} className={`rounded-lg px-3 py-1.5 text-sm ${kindFilter === value ? "bg-[#eaf1fc] text-[#2c4a80]" : "text-slate-500 hover:bg-slate-50"}`}>
+          <button key={value} onClick={() => setKindFilter(value)} className={`rounded-lg px-3 py-1.5 text-sm ${kindFilter === value ? "bg-accent text-accent-foreground" : "text-slate-500 dark:text-muted-foreground hover:bg-slate-50 dark:hover:bg-muted"}`}>
             {planKindFilterLabels[value]}
           </button>
         ))}
-        <span className="h-5 w-px bg-slate-200" />
+        <span className="h-5 w-px bg-slate-200 dark:bg-accent" />
         {planStatusFilters.map((value) => (
-          <button key={value} onClick={() => setStatusFilter(value)} className={`rounded-lg px-3 py-1.5 text-sm ${statusFilter === value ? "bg-[#eaf1fc] text-[#2c4a80]" : "text-slate-500 hover:bg-slate-50"}`}>
+          <button key={value} onClick={() => setStatusFilter(value)} className={`rounded-lg px-3 py-1.5 text-sm ${statusFilter === value ? "bg-accent text-accent-foreground" : "text-slate-500 dark:text-muted-foreground hover:bg-slate-50 dark:hover:bg-muted"}`}>
             {planStatusFilterLabels[value]}
           </button>
         ))}
@@ -199,19 +200,19 @@ function PlansPanel({ links, onChanged }: { links: PaymentLink[]; onChanged: () 
       <Table className="table-fixed">
         <TableHeader>
           <TableRow>
-            <ResizableTh width={widths.getWidth("plan", 240)} onResizeStart={widths.startResize("plan", 240)}>Plano</ResizableTh>
-            {columns.isVisible("kind") && <ResizableTh width={widths.getWidth("kind")} onResizeStart={widths.startResize("kind")}>Tipo</ResizableTh>}
-            {columns.isVisible("billingPeriod") && <ResizableTh width={widths.getWidth("billingPeriod")} onResizeStart={widths.startResize("billingPeriod")}>Periodicidade</ResizableTh>}
-            {columns.isVisible("value") && <ResizableTh width={widths.getWidth("value")} onResizeStart={widths.startResize("value")} className="text-right">Preço padrão</ResizableTh>}
-            {columns.isVisible("installments") && <ResizableTh width={widths.getWidth("installments")} onResizeStart={widths.startResize("installments")}>Parcelamento</ResizableTh>}
-            {columns.isVisible("activeLinks") && <ResizableTh width={widths.getWidth("activeLinks")} onResizeStart={widths.startResize("activeLinks")} className="text-right">Links ativos</ResizableTh>}
-            {columns.isVisible("status") && <ResizableTh width={widths.getWidth("status")} onResizeStart={widths.startResize("status")}>Status</ResizableTh>}
+            <ResizableTh {...sorting.header("plan")} width={widths.getWidth("plan", 240)} onResizeStart={widths.startResize("plan", 240)}>Plano</ResizableTh>
+            {columns.isVisible("kind") && <ResizableTh {...sorting.header("kind")} width={widths.getWidth("kind")} onResizeStart={widths.startResize("kind")}>Tipo</ResizableTh>}
+            {columns.isVisible("billingPeriod") && <ResizableTh {...sorting.header("billingPeriod")} width={widths.getWidth("billingPeriod")} onResizeStart={widths.startResize("billingPeriod")}>Periodicidade</ResizableTh>}
+            {columns.isVisible("value") && <ResizableTh {...sorting.header("value")} width={widths.getWidth("value")} onResizeStart={widths.startResize("value")} className="text-right">Preço padrão</ResizableTh>}
+            {columns.isVisible("installments") && <ResizableTh {...sorting.header("installments")} width={widths.getWidth("installments")} onResizeStart={widths.startResize("installments")}>Parcelamento</ResizableTh>}
+            {columns.isVisible("activeLinks") && <ResizableTh {...sorting.header("activeLinks")} width={widths.getWidth("activeLinks")} onResizeStart={widths.startResize("activeLinks")} className="text-right">Links ativos</ResizableTh>}
+            {columns.isVisible("status") && <ResizableTh {...sorting.header("status")} width={widths.getWidth("status")} onResizeStart={widths.startResize("status")}>Status</ResizableTh>}
             <TableHead className="w-[168px]" />
           </TableRow>
         </TableHeader>
         <TableBody>
-          {!loading && plans.length === 0 && <TableRow><TableCell colSpan={columns.visibleCount + 2} className="text-center text-sm text-slate-500">Nenhum plano cadastrado ainda.</TableCell></TableRow>}
-          {plans.filter((plan) => (kindFilter === "ALL" || plan.kind === kindFilter) && (statusFilter === "ALL" || plan.status === statusFilter)).map((plan) => (
+          {!loading && plans.length === 0 && <TableRow><TableCell colSpan={columns.visibleCount + 2} className="text-center text-sm text-slate-500 dark:text-muted-foreground">Nenhum plano cadastrado ainda.</TableCell></TableRow>}
+          {sorting.rows(plans.filter((plan) => (kindFilter === "ALL" || plan.kind === kindFilter) && (statusFilter === "ALL" || plan.status === statusFilter)), plan => ({ plan: plan.name, kind: planKindLabels[plan.kind], billingPeriod: plan.billing_period === "ANNUAL" ? "Anual" : plan.billing_period === "ONE_TIME" ? "Taxa única" : "Mensal", value: plan.standard_value == null ? null : Number(plan.standard_value), installments: plan.billing_period === "ANNUAL" || isOneTimePlanKind(plan.kind) ? plan.annual_installment_limit ?? 6 : null, activeLinks: activeLinkCountByPlan.get(plan.id) ?? 0, status: plan.status === "ACTIVE" ? "Ativo" : "Inativo" })).map((plan) => (
             <PlanRow
               key={plan.id}
               plan={plan}
@@ -282,7 +283,7 @@ function PlanRow({ plan, activeLinks, editing, visibleColumns, onEdit, onCancelE
         <Button size="sm" variant="ghost" onClick={onEdit}>Editar</Button>
         <Button size="sm" variant="outline" onClick={onToggleStatus}>{plan.status === "ACTIVE" ? "Desativar" : "Ativar"}</Button>
         {activeLinks > 0 && (
-          <Button size="sm" variant="ghost" onClick={onDeactivateLinks} title="Desativar todos os links vinculados a este plano (também no Asaas)" className="text-red-600 hover:text-red-700">
+          <Button size="sm" variant="ghost" onClick={onDeactivateLinks} title="Desativar todos os links vinculados a este plano (também no Asaas)" className="text-red-600 dark:text-red-300 hover:text-red-700 dark:hover:text-red-300">
             <Link2Off className="size-4" />
           </Button>
         )}
@@ -311,6 +312,7 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const columns = useColumnVisibility(linkColumns);
   const widths = useColumnWidths(linkColumns);
+  const sorting = useTableSort();
 
   useEffect(() => {
     fetch("/api/plans?status=all").then((response) => response.json()).then((data) => setPlans(data.plans ?? [])).catch(() => setPlans([]));
@@ -511,11 +513,11 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
   }, [onChanged]);
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.04)]">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
+    <section className="rounded-2xl border border-slate-200 dark:border-border bg-white dark:bg-card shadow-[0_10px_30px_rgba(15,23,42,0.04)]">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 dark:border-border p-5">
         <div>
           <h2 className="font-semibold">Links de pagamento</h2>
-          <p className="mt-1 text-sm text-slate-500">{pendingCount > 0 ? `${pendingCount} link(s) pendente(s) de vinculação` : "Todos os links estão vinculados"}</p>
+          <p className="mt-1 text-sm text-slate-500 dark:text-muted-foreground">{pendingCount > 0 ? `${pendingCount} link(s) pendente(s) de vinculação` : "Todos os links estão vinculados"}</p>
         </div>
         <div className="flex items-center gap-2">
           {dirtySelectedCount > 0 && (
@@ -526,15 +528,15 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
           <Button variant="outline" size="sm" disabled={syncing} onClick={syncFromAsaas}>{syncing ? "Sincronizando…" : "Sincronizar links do Asaas"}</Button>
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 p-4">
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 dark:border-border p-4">
         {linkFilters.map((value) => (
-          <button key={value} onClick={() => setFilter(value)} className={`rounded-lg px-3 py-1.5 text-sm ${filter === value ? "bg-[#eaf1fc] text-[#2c4a80]" : "text-slate-500 hover:bg-slate-50"}`}>
+          <button key={value} onClick={() => setFilter(value)} className={`rounded-lg px-3 py-1.5 text-sm ${filter === value ? "bg-accent text-accent-foreground" : "text-slate-500 dark:text-muted-foreground hover:bg-slate-50 dark:hover:bg-muted"}`}>
             {linkFilterLabels[value]}{value === "PENDING" && pendingCount > 0 ? ` (${pendingCount})` : ""}
           </button>
         ))}
-        <span className="h-5 w-px bg-slate-200" />
+        <span className="h-5 w-px bg-slate-200 dark:bg-accent" />
         {planKindFilters.map((value) => (
-          <button key={value} onClick={() => setKindFilter(value)} className={`rounded-lg px-3 py-1.5 text-sm ${kindFilter === value ? "bg-[#eaf1fc] text-[#2c4a80]" : "text-slate-500 hover:bg-slate-50"}`}>
+          <button key={value} onClick={() => setKindFilter(value)} className={`rounded-lg px-3 py-1.5 text-sm ${kindFilter === value ? "bg-accent text-accent-foreground" : "text-slate-500 dark:text-muted-foreground hover:bg-slate-50 dark:hover:bg-muted"}`}>
             {planKindFilterLabels[value]}
           </button>
         ))}
@@ -552,19 +554,19 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
         <TableHeader>
           <TableRow>
             <TableHead className="w-[40px]"><Checkbox checked={allFilteredSelected} onCheckedChange={(checked) => toggleSelectAll(checked === true)} aria-label="Selecionar todos os links filtrados" /></TableHead>
-            <ResizableTh width={widths.getWidth("link", 260)} onResizeStart={widths.startResize("link", 260)}>Link</ResizableTh>
-            {columns.isVisible("kind") && <ResizableTh width={widths.getWidth("kind")} onResizeStart={widths.startResize("kind")}>Tipo</ResizableTh>}
-            {columns.isVisible("actor") && <ResizableTh width={widths.getWidth("actor")} onResizeStart={widths.startResize("actor")}>Ator</ResizableTh>}
-            {columns.isVisible("plan") && <ResizableTh width={widths.getWidth("plan")} onResizeStart={widths.startResize("plan")}>Plano</ResizableTh>}
-            {columns.isVisible("value") && <ResizableTh width={widths.getWidth("value")} onResizeStart={widths.startResize("value")} className="text-right">Valor</ResizableTh>}
-            {columns.isVisible("source") && <ResizableTh width={widths.getWidth("source")} onResizeStart={widths.startResize("source")}>Origem</ResizableTh>}
-            {columns.isVisible("status") && <ResizableTh width={widths.getWidth("status")} onResizeStart={widths.startResize("status")}>Status</ResizableTh>}
+            <ResizableTh {...sorting.header("link")} width={widths.getWidth("link", 260)} onResizeStart={widths.startResize("link", 260)}>Link</ResizableTh>
+            {columns.isVisible("kind") && <ResizableTh {...sorting.header("kind")} width={widths.getWidth("kind")} onResizeStart={widths.startResize("kind")}>Tipo</ResizableTh>}
+            {columns.isVisible("actor") && <ResizableTh {...sorting.header("actor")} width={widths.getWidth("actor")} onResizeStart={widths.startResize("actor")}>Ator</ResizableTh>}
+            {columns.isVisible("plan") && <ResizableTh {...sorting.header("plan")} width={widths.getWidth("plan")} onResizeStart={widths.startResize("plan")}>Plano</ResizableTh>}
+            {columns.isVisible("value") && <ResizableTh {...sorting.header("value")} width={widths.getWidth("value")} onResizeStart={widths.startResize("value")} className="text-right">Valor</ResizableTh>}
+            {columns.isVisible("source") && <ResizableTh {...sorting.header("source")} width={widths.getWidth("source")} onResizeStart={widths.startResize("source")}>Origem</ResizableTh>}
+            {columns.isVisible("status") && <ResizableTh {...sorting.header("status")} width={widths.getWidth("status")} onResizeStart={widths.startResize("status")}>Status</ResizableTh>}
             <TableHead className="w-[190px]" />
           </TableRow>
         </TableHeader>
         <TableBody>
-          {filtered.length === 0 && <TableRow><TableCell colSpan={columns.visibleCount + 3} className="text-center text-sm text-slate-500">Nenhum link nesse filtro.</TableCell></TableRow>}
-          {filtered.map((link) => {
+          {filtered.length === 0 && <TableRow><TableCell colSpan={columns.visibleCount + 3} className="text-center text-sm text-slate-500 dark:text-muted-foreground">Nenhum link nesse filtro.</TableCell></TableRow>}
+          {sorting.rows(filtered, link => ({ link: link.display_name, kind: planKindLabels[linkKind(link, planById)], actor: actors.find(actor => actor.id === draftActorId(link))?.name, plan: planById.get(draftPlanId(link) ?? "")?.name, value: Number(link.value), source: link.source === "ASAAS_SYNC" ? "Importado do Asaas" : "Gerado aqui", status: link.status === "ACTIVE" ? "Ativo" : link.status === "PENDING" ? "Pendente" : "Inativo" })).map((link) => {
             const boundPlan = link.plan_id ? planById.get(link.plan_id) : undefined;
             return (
               <LinkRow
@@ -684,7 +686,7 @@ const LinkRow = memo(function LinkRow({
         </TableCell>
       )}
       {showValue && <TableCell className="text-right text-sm">{money.format(link.value)}<span className="ml-1 text-xs text-slate-400">{link.billing_period === "ANNUAL" ? "/ano" : link.billing_period === "ONE_TIME" ? " · taxa única" : "/mês"}</span></TableCell>}
-      {showSource && <TableCell className="text-xs text-slate-500">{link.source === "ASAAS_SYNC" ? "Importado do Asaas" : "Gerado aqui"}</TableCell>}
+      {showSource && <TableCell className="text-xs text-slate-500 dark:text-muted-foreground">{link.source === "ASAAS_SYNC" ? "Importado do Asaas" : "Gerado aqui"}</TableCell>}
       {showStatus && <TableCell><StatusBadge status={link.status} /></TableCell>}
       <TableCell className="flex justify-end gap-1.5">
         {dirty && (
@@ -692,7 +694,7 @@ const LinkRow = memo(function LinkRow({
             {confirming ? "Vinculando…" : "Vincular"}
           </Button>
         )}
-        <Button variant="ghost" size="sm" disabled={toggling} onClick={() => onToggleStatus(link.id)} className={link.status === "INACTIVE" ? "text-emerald-700 hover:text-emerald-800" : "text-red-600 hover:text-red-700"}>
+        <Button variant="ghost" size="sm" disabled={toggling} onClick={() => onToggleStatus(link.id)} className={link.status === "INACTIVE" ? "text-emerald-700 dark:text-emerald-300 hover:text-emerald-800 dark:hover:text-emerald-300" : "text-red-600 dark:text-red-300 hover:text-red-700 dark:hover:text-red-300"}>
           {toggling ? "…" : link.status === "INACTIVE" ? "Reativar" : "Desativar"}
         </Button>
       </TableCell>

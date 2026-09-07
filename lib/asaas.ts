@@ -1,10 +1,15 @@
+import { currentTenant } from "./tenant-server";
+import { asaasBaseUrl, readIntegrationKey } from "./integrations-server";
 type AsaasRequestOptions = {
   method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   query?: Record<string, string | undefined>;
   body?: unknown;
 };
 
-export function getAsaasConfig() {
+export async function getAsaasConfig() {
+  const stored = await readIntegrationKey("asaas");
+  if (stored) return { apiKey: stored.apiKey, baseUrl: asaasBaseUrl(stored.environment) };
+  if (!(await currentTenant()).legacy) return null;
   const apiKey = process.env.ASAAS_API_KEY;
   const baseUrl = process.env.ASAAS_BASE_URL ?? "https://api-sandbox.asaas.com/v3";
   if (!apiKey) return null;
@@ -12,7 +17,7 @@ export function getAsaasConfig() {
 }
 
 export async function asaasRequest<T>(path: string, options: AsaasRequestOptions = {}): Promise<T> {
-  const config = getAsaasConfig();
+  const config = await getAsaasConfig();
   if (!config) throw new Error("A integração com o Asaas ainda não foi configurada.");
   const url = new URL(`${config.baseUrl}${path}`);
   for (const [key, value] of Object.entries(options.query ?? {})) {

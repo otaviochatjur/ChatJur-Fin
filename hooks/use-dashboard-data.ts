@@ -29,16 +29,16 @@ export function useDashboardData() {
     // in the async continuation below, never synchronously on call).
     try {
       const [summaryRes, plansRes, customersRes, subscriptionsRes, paymentsRes, implementationPaymentsRes, auditRes, linksRes, leadsRes, eventsRes] = await Promise.all([
-        fetch("/api/dashboard-summary"),
-        fetch("/api/plans"),
-        fetch("/api/customers"),
-        fetch("/api/subscriptions"),
-        fetch("/api/payments"),
-        fetch("/api/implementation-payments"),
-        fetch("/api/audit-events?limit=15"),
-        fetch("/api/asaas/payment-links"),
-        fetch("/api/connect-leads"),
-        fetch("/api/customer-activities"),
+        fetch("/api/dashboard-summary", { signal: AbortSignal.timeout(20000) }),
+        fetch("/api/plans", { signal: AbortSignal.timeout(20000) }),
+        fetch("/api/customers", { signal: AbortSignal.timeout(20000) }),
+        fetch("/api/subscriptions", { signal: AbortSignal.timeout(20000) }),
+        fetch("/api/payments", { signal: AbortSignal.timeout(20000) }),
+        fetch("/api/implementation-payments", { signal: AbortSignal.timeout(20000) }),
+        fetch("/api/audit-events?limit=15", { signal: AbortSignal.timeout(20000) }),
+        fetch("/api/asaas/payment-links", { signal: AbortSignal.timeout(20000) }),
+        fetch("/api/connect-leads", { signal: AbortSignal.timeout(20000) }),
+        fetch("/api/customer-activities", { signal: AbortSignal.timeout(20000) }),
       ]);
       const [summary, plansData, customersData, subscriptionsData, paymentsData, implementationPaymentsData, auditData, linksData, leadsData, eventsData] = await Promise.all([
         summaryRes.json(), plansRes.json(), customersRes.json(), subscriptionsRes.json(), paymentsRes.json(), implementationPaymentsRes.json(), auditRes.json(), linksRes.json(), leadsRes.json(), eventsRes.json(),
@@ -61,7 +61,7 @@ export function useDashboardData() {
       setConnectLeads(leadsRes.ok ? leadsData.leads ?? [] : []);
       setError(null);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Erro ao carregar dados do Supabase.");
+      setError(caught instanceof Error && caught.name === "TimeoutError" ? "A consulta demorou mais que o esperado. Tente novamente." : caught instanceof Error ? caught.message : "Erro ao carregar dados do Supabase.");
     } finally {
       setLoading(false);
     }

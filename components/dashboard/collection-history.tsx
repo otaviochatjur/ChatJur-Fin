@@ -1,0 +1,12 @@
+"use client";
+import { useEffect,useState } from "react";
+import { collectionToday, type CollectionPreview } from "@/lib/collection-policy";
+import { money } from "@/lib/metrics";
+import { Input } from "@/components/ui/input";
+import { Table,TableBody,TableCell,TableHead,TableHeader,TableRow } from "@/components/ui/table";
+type History = {id:string;action:string;created_at:string;after_json:CollectionPreview & { imported?:boolean;original_status?:string;source?:{file:string;row:number} }};
+export function CollectionHistory() {
+  const [month,setMonth]=useState(collectionToday().slice(0,7)),[rows,setRows]=useState<History[]>([]),[error,setError]=useState("");
+  useEffect(()=>{let alive=true;fetch(`/api/collections/history?month=${month}`).then(async r=>{const data=await r.json();if(!r.ok)throw new Error(data.error);if(alive){setRows(data.rows);setError("");}}).catch(e=>{if(alive)setError(e.message);});return()=>{alive=false;};},[month]);
+  return <section className="space-y-4 rounded-2xl border bg-card p-5"><div className="flex flex-wrap justify-between gap-3"><h2 className="text-lg font-semibold">Histórico de cobranças</h2><Input className="w-auto" type="month" value={month} onChange={e=>setMonth(e.target.value)}/></div><p className="text-sm text-muted-foreground">{rows.filter(r=>r.action==="SENT").length} enviados · {rows.filter(r=>r.action==="SKIPPED").length} pulados · {rows.filter(r=>!["SENT","SKIPPED"].includes(r.action)).length} para revisão. Registros importados preservam o status informado no arquivo.</p>{error&&<p role="alert" className="text-sm text-destructive">{error}</p>}<div className="max-h-[600px] overflow-auto"><Table><TableHeader><TableRow><TableHead>Data</TableHead><TableHead>Cliente</TableHead><TableHead>Template</TableHead><TableHead>Valor</TableHead><TableHead>Resultado</TableHead><TableHead>Origem</TableHead></TableRow></TableHeader><TableBody>{rows.map(row=><TableRow key={row.id}><TableCell>{new Date(row.created_at).toLocaleString("pt-BR",{timeZone:"America/Sao_Paulo"})}</TableCell><TableCell>{row.after_json.contact?.name??row.after_json.payment.contact_name}</TableCell><TableCell>{row.after_json.stage}</TableCell><TableCell>{money.format(row.after_json.payment.value)}</TableCell><TableCell>{row.after_json.original_status??(row.action==="SENT"?"Enviado":row.action==="SKIPPED"?"Pulado":"Revisar tentativa")}</TableCell><TableCell>{row.after_json.imported?`${row.after_json.source?.file} · linha ${row.after_json.source?.row}`:"Sistema"}</TableCell></TableRow>)}</TableBody></Table></div></section>;
+}

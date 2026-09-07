@@ -13,8 +13,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { ColumnVisibilityMenu, ResizableTh, useColumnVisibility, useColumnWidths, type ColumnDef } from "@/components/dashboard/table-toolbar";
+import { ColumnVisibilityMenu, ResizableTh, useTableSort, useColumnVisibility, useColumnWidths, type ColumnDef } from "@/components/dashboard/table-toolbar";
 import { isPaidStatus, money, monthlyValue, planBadgeClass, planKindLabels, roleLabels, type CommercialActor, type Customer, type ImplementationPayment, type Payment, type PaymentLink, type Plan, type Subscription } from "@/lib/metrics";
+import { currentLinkedSubscriptions } from "@/lib/subscription-presentation";
 import { localDate } from "@/lib/customer-activity";
 
 const clientColumns: ColumnDef<"status" | "plan" | "mrr" | "actor" | "signedAt">[] = [
@@ -28,16 +29,16 @@ const clientColumns: ColumnDef<"status" | "plan" | "mrr" | "actor" | "signedAt">
 type ConfirmedStatus = "ACTIVE" | "CANCELLED" | "FROZEN";
 const statusLabels: Record<ConfirmedStatus, string> = { ACTIVE: "Ativo", CANCELLED: "Cancelado", FROZEN: "Congelado" };
 const statusBadgeClass: Record<ConfirmedStatus, string> = {
-  ACTIVE: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  CANCELLED: "border-red-200 bg-red-50 text-red-700",
-  FROZEN: "border-amber-200 bg-amber-50 text-amber-700",
+  ACTIVE: "border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300",
+  CANCELLED: "border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300",
+  FROZEN: "border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300",
 };
 /** Both customers.status and subscriptions.status can be null (operator hasn't manually confirmed it yet, e.g. right after the Set/2026 reset) until the operator sets it or, for customers, a CANCELLATION activity auto-sets it. */
 function statusLabelOrUnset(status: ConfirmedStatus | null) {
   return status ? statusLabels[status] : "Sem status";
 }
 function statusBadgeClassOrUnset(status: ConfirmedStatus | null) {
-  return status ? statusBadgeClass[status] : "border-slate-200 bg-slate-50 text-slate-500";
+  return status ? statusBadgeClass[status] : "border-slate-200 dark:border-border bg-slate-50 dark:bg-muted text-slate-500 dark:text-muted-foreground";
 }
 
 function formatCustomization(item: ActiveCustomization) {
@@ -53,7 +54,7 @@ function CustomizationHint({ items }: { items: ActiveCustomization[] }) {
     <TooltipProvider delayDuration={150}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <span tabIndex={0} onClick={(event) => event.stopPropagation()} className="inline-flex shrink-0 cursor-help items-center rounded-full p-0.5 text-[#3b82f6] outline-none hover:bg-blue-50 focus-visible:bg-blue-50" aria-label="Plano personalizado em relação ao base">
+          <span tabIndex={0} onClick={(event) => event.stopPropagation()} className="inline-flex shrink-0 cursor-help items-center rounded-full p-0.5 text-[#3b82f6] outline-none hover:bg-blue-50 dark:hover:bg-blue-950 focus-visible:bg-blue-50" aria-label="Plano personalizado em relação ao base">
             <SlidersHorizontal className="size-3.5" />
           </span>
         </TooltipTrigger>
@@ -99,6 +100,7 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
   const [lastSync, setLastSync] = useState<PaymentSyncRun | null>(null);
   const columns = useColumnVisibility(clientColumns);
   const widths = useColumnWidths(clientColumns);
+  const sorting = useTableSort();
 
   async function loadLastSync() {
     const response = await fetch("/api/audit-events?entityType=payment_sync&limit=1");
@@ -113,8 +115,6 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
     loadLastSync();
   }, []);
 
-  const actorById = useMemo(() => new Map(actors.map((actor) => [actor.id, actor])), [actors]);
-  const actorName = (id: string | null) => (id ? actorById.get(id)?.name : undefined) ?? "Orgânico / sem parceiro";
 
   const activeSubscriptionByCustomer = useMemo(() => {
     const map = new Map<string, Subscription>();
@@ -124,6 +124,17 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
     }
     return map;
   }, [subscriptions]);
+
+  const linkedByCustomer = useMemo(() => {
+    const map = new Map<string, Subscription[]>();
+    for (const subscription of currentLinkedSubscriptions(subscriptions)) {
+      const list = map.get(subscription.customer_id) ?? [];
+      list.push(subscription);
+      map.set(subscription.customer_id, list);
+    }
+    return map;
+  }, [subscriptions]);
+  const displayedSubscriptionByCustomer = useMemo(() => new Map([...linkedByCustomer].map(([id, list]) => [id, list[0]])), [linkedByCustomer]);
 
   // `activeCustomizations` scans the *entire* `events` array — fine for one
   // subscription, but the clients table calls it once per *visible row*
@@ -142,11 +153,11 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
     const term = search.trim().toLowerCase();
     return customers.filter((customer) => {
       if (statusFilter === "UNSET" ? customer.status !== null : statusFilter !== "all" && customer.status !== statusFilter) return false;
-      if (actorFilter !== "all" && customer.acquisition_actor_id !== actorFilter) return false;
+      if (actorFilter !== "all" && !(linkedByCustomer.get(customer.id) ?? []).some(s => s.display_actor_id === actorFilter)) return false;
       if (!term) return true;
       return [customer.office_name, customer.responsible_name, customer.email].some((field) => field?.toLowerCase().includes(term));
     });
-  }, [customers, search, statusFilter, actorFilter]);
+  }, [customers, search, statusFilter, actorFilter, linkedByCustomer]);
 
   const selected = customers.find((customer) => customer.id === selectedId) ?? null;
   const selectedSubscriptions = selected ? subscriptions.filter((subscription) => subscription.customer_id === selected.id) : [];
@@ -174,29 +185,29 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
 
   return (
     <div className="space-y-5">
-      <section className="rounded-2xl border border-slate-200 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.04)]">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
+      <section className="rounded-2xl border border-slate-200 dark:border-border bg-white dark:bg-card shadow-[0_10px_30px_rgba(15,23,42,0.04)]">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 dark:border-border p-5">
           <div>
-            <h2 className="font-semibold">Clientes</h2>
-            <p className="mt-1 text-sm text-slate-500">Novos clientes só entram se já constarem na aba ⭐ Base de Clientes do Google Sheets</p>
+            <h2 className="font-semibold">Carteira de clientes</h2>
+            <p className="mt-1 text-sm text-slate-500 dark:text-muted-foreground">Novos clientes só entram se já constarem na aba ⭐ Base de Clientes do Google Sheets</p>
           </div>
           <div className="flex flex-col items-end gap-1">
             <Button variant="outline" size="sm" disabled={syncingAll} onClick={syncAllPayments}>{syncingAll ? "Sincronizando…" : "Sincronizar pagamentos"}</Button>
             {lastSync && (
               lastSync.action === "FAILED" ? (
-                <p className="text-xs text-red-600" title={lastSync.after_json?.error ?? ""}>Última sincronização falhou em {fmtDateTime(lastSync.created_at)}</p>
+                <p className="text-xs text-red-600 dark:text-red-300" title={lastSync.after_json?.error ?? ""}>Última sincronização falhou em {fmtDateTime(lastSync.created_at)}</p>
               ) : (
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-slate-500 dark:text-muted-foreground">
                   Última sincronização: {fmtDateTime(lastSync.created_at)} · {lastSync.after_json?.payments ?? 0} pagamento(s)
                   {lastSync.after_json?.errors && lastSync.after_json.errors.length > 0 && (
-                    <span className="text-amber-600" title={lastSync.after_json.errors.map((error) => error.message).join("\n")}> · {lastSync.after_json.errors.length} link(s) falharam</span>
+                    <span className="text-amber-600 dark:text-amber-300" title={lastSync.after_json.errors.map((error) => error.message).join("\n")}> · {lastSync.after_json.errors.length} link(s) falharam</span>
                   )}
                 </p>
               )
             )}
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 p-4">
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 dark:border-border p-4">
           <div className="relative flex-1 min-w-[200px]">
             <Search className="absolute left-3 top-2.5 size-4 text-slate-400" />
             <Input className="pl-9" placeholder="Buscar por escritório, responsável ou e-mail" value={search} onChange={(event) => setSearch(event.target.value)} />
@@ -223,30 +234,31 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
         <Table className="table-fixed">
           <TableHeader>
             <TableRow>
-              <ResizableTh width={widths.getWidth("client", 220)} onResizeStart={widths.startResize("client", 220)}>Cliente</ResizableTh>
-              {columns.isVisible("status") && <ResizableTh width={widths.getWidth("status")} onResizeStart={widths.startResize("status")}>Status</ResizableTh>}
-              {columns.isVisible("plan") && <ResizableTh width={widths.getWidth("plan")} onResizeStart={widths.startResize("plan")}>Plano</ResizableTh>}
-              {columns.isVisible("mrr") && <ResizableTh width={widths.getWidth("mrr")} onResizeStart={widths.startResize("mrr")} className="text-right">MRR</ResizableTh>}
-              {columns.isVisible("actor") && <ResizableTh width={widths.getWidth("actor")} onResizeStart={widths.startResize("actor")}>Parceiro</ResizableTh>}
-              {columns.isVisible("signedAt") && <ResizableTh width={widths.getWidth("signedAt")} onResizeStart={widths.startResize("signedAt")}>Assinado em</ResizableTh>}
+              <ResizableTh {...sorting.header("client")} width={widths.getWidth("client", 220)} onResizeStart={widths.startResize("client", 220)}>Cliente</ResizableTh>
+              {columns.isVisible("status") && <ResizableTh {...sorting.header("status")} width={widths.getWidth("status")} onResizeStart={widths.startResize("status")}>Status</ResizableTh>}
+              {columns.isVisible("plan") && <ResizableTh {...sorting.header("plan")} width={widths.getWidth("plan")} onResizeStart={widths.startResize("plan")}>Plano</ResizableTh>}
+              {columns.isVisible("mrr") && <ResizableTh {...sorting.header("mrr")} width={widths.getWidth("mrr")} onResizeStart={widths.startResize("mrr")} className="text-right">MRR</ResizableTh>}
+              {columns.isVisible("actor") && <ResizableTh {...sorting.header("actor")} width={widths.getWidth("actor")} onResizeStart={widths.startResize("actor")}>Parceiro</ResizableTh>}
+              {columns.isVisible("signedAt") && <ResizableTh {...sorting.header("signedAt")} width={widths.getWidth("signedAt")} onResizeStart={widths.startResize("signedAt")}>Assinado em</ResizableTh>}
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filtered.length === 0 && <TableRow><TableCell colSpan={columns.visibleCount + 1} className="text-center text-sm text-slate-500">Nenhum cliente encontrado.</TableCell></TableRow>}
-            {filtered.map((customer) => {
-              const subscription = activeSubscriptionByCustomer.get(customer.id);
-              const mrr = subscription ? monthlyValue(subscription.value, subscription.billing_period) : 0;
+            {filtered.length === 0 && <TableRow><TableCell colSpan={columns.visibleCount + 1} className="text-center text-sm text-slate-500 dark:text-muted-foreground">Nenhum cliente encontrado.</TableCell></TableRow>}
+            {sorting.rows(filtered, customer => { return { client: customer.office_name, status: statusLabelOrUnset(customer.status), plan: (linkedByCustomer.get(customer.id) ?? []).map(s => s.display_plan_name).join(", "), mrr: activeSubscriptionByCustomer.get(customer.id) ? monthlyValue(activeSubscriptionByCustomer.get(customer.id)!.value, activeSubscriptionByCustomer.get(customer.id)!.billing_period) : null, actor: (linkedByCustomer.get(customer.id) ?? []).map(s => s.display_actor_label ?? "Sem responsável comercial").join(" · "), signedAt: customer.signed_at }; }).map((customer) => {
+              const subscription = displayedSubscriptionByCustomer.get(customer.id);
+              const active = activeSubscriptionByCustomer.get(customer.id);
+              const mrr = active ? monthlyValue(active.value, active.billing_period) : 0;
               return (
                 <TableRow key={customer.id} onClick={() => setSelectedId(customer.id)} className={`cursor-pointer ${selectedId === customer.id ? "bg-[#eaf1fc]" : ""}`}>
                   <TableCell>
                     <button className="font-medium text-left hover:underline" aria-haspopup="dialog" onClick={() => setSelectedId(customer.id)}>{customer.office_name}</button>
-                    <p className="text-xs text-slate-500">{customer.responsible_name ?? customer.email ?? "—"}</p>
+                    <p className="text-xs text-slate-500 dark:text-muted-foreground">{customer.responsible_name ?? customer.email ?? "—"}</p>
                   </TableCell>
                   {columns.isVisible("status") && <TableCell><Badge variant="outline" className={statusBadgeClassOrUnset(customer.status)}>{statusLabelOrUnset(customer.status)}</Badge></TableCell>}
-                  {columns.isVisible("plan") && <TableCell className="text-sm text-slate-600"><span className="inline-flex items-center gap-1">{subscription?.plan_name_raw ?? "—"}{subscription && <CustomizationHint items={customizationsByCustomer.get(customer.id) ?? []} />}</span></TableCell>}
+                  {columns.isVisible("plan") && <TableCell className="text-sm text-slate-600 dark:text-muted-foreground"><span className="inline-flex items-center gap-1">{(linkedByCustomer.get(customer.id) ?? []).map(s => s.display_plan_name).join(" · ") || "—"}{(linkedByCustomer.get(customer.id)?.length ?? 0) > 1 && <Badge variant="outline" className="text-amber-700 dark:text-amber-300">Revisar planos</Badge>}{subscription && <CustomizationHint items={customizationsByCustomer.get(customer.id) ?? []} />}</span></TableCell>}
                   {columns.isVisible("mrr") && <TableCell className="text-right text-sm font-medium">{mrr > 0 ? money.format(mrr) : "—"}</TableCell>}
-                  {columns.isVisible("actor") && <TableCell className="text-sm text-slate-600">{actorName(customer.acquisition_actor_id)}</TableCell>}
-                  {columns.isVisible("signedAt") && <TableCell className="text-sm text-slate-500">{fmtDate(customer.signed_at)}</TableCell>}
+                  {columns.isVisible("actor") && <TableCell className="text-sm text-slate-600 dark:text-muted-foreground">{(linkedByCustomer.get(customer.id) ?? []).map(s => s.display_actor_label ?? "Sem responsável comercial").join(" · ") || "—"}</TableCell>}
+                  {columns.isVisible("signedAt") && <TableCell className="text-sm text-slate-500 dark:text-muted-foreground">{fmtDate(customer.signed_at)}</TableCell>}
                 </TableRow>
               );
             })}
@@ -276,7 +288,7 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
   );
 }
 
-function ClientDetail({ customer, subscriptions, payments, implementationPayments, plans, actors, links, events, onChanged }: {
+function ClientDetail({ customer, subscriptions, payments, implementationPayments, plans, actors, events, onChanged }: {
   customer: Customer;
   subscriptions: Subscription[];
   payments: Payment[];
@@ -287,16 +299,7 @@ function ClientDetail({ customer, subscriptions, payments, implementationPayment
   events: CustomerActivity[];
   onChanged: () => void;
 }) {
-  const linkById = new Map(links.map((link) => [link.id, link]));
   const planById = new Map(plans.map((plan) => [plan.id, plan]));
-  const actorById = new Map(actors.map((actor) => [actor.id, actor]));
-  const linkLabel = (paymentLinkId: string | null) => {
-    if (!paymentLinkId) return null;
-    const link = linkById.get(paymentLinkId);
-    if (!link) return null;
-    const actor = link.actor_id ? actorById.get(link.actor_id) : undefined;
-    return `${link.display_name}${actor ? ` · parceiro: ${actor.name}` : ""}`;
-  };
   const [status, setStatus] = useState<Customer["status"]>(customer.status);
   const [cancellationCategory, setCancellationCategory] = useState(customer.cancellation_category ?? "");
   const [cancellationReason, setCancellationReason] = useState(customer.cancellation_reason ?? "");
@@ -336,43 +339,44 @@ function ClientDetail({ customer, subscriptions, payments, implementationPayment
       <div>
         <p className="text-xs font-medium uppercase tracking-[0.14em] text-[#3b82f6]">Cliente selecionado</p>
         <h2 className="mt-2 text-lg font-semibold">{customer.office_name}</h2>
-        <p className="text-sm text-slate-500">{customer.responsible_name ?? "—"} · {customer.email ?? "sem e-mail"}</p>
+        <p className="text-sm text-slate-500 dark:text-muted-foreground">{customer.responsible_name ?? "—"} · {customer.email ?? "sem e-mail"}</p>
         {(customer.city || customer.state) && <p className="text-xs text-slate-400">{[customer.city, customer.state].filter(Boolean).join(" - ")}</p>}
       </div>
 
+      {currentLinkedSubscriptions(subscriptions).length > 1 && <div role="alert" className="rounded-xl bg-amber-500/10 p-4 text-sm text-amber-900 dark:text-amber-200"><p className="font-medium">Este cliente possui mais de um plano vinculado em uso.</p><p className="mt-1">Confira as assinaturas abaixo e desative o plano que não deve permanecer no painel. Essa ação mantém o histórico e não cancela cobranças no Asaas.</p></div>}
       <CustomerTimeline subscriptions={subscriptions} customerId={customer.id} events={events} onChanged={onChanged} />
-      <div className="space-y-2 rounded-xl border border-slate-200 p-3">
+      <div className="space-y-2 rounded-xl border border-slate-200 dark:border-border p-3">
         <div className="flex items-center justify-between">
-          <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">Assinaturas</p>
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500 dark:text-muted-foreground">Assinaturas</p>
           <Button variant="outline" size="sm" onClick={() => setAddingPlan((current) => !current)}>{addingPlan ? "Cancelar" : "+ Cadastrar plano"}</Button>
         </div>
-        {subscriptions.length === 0 && !addingPlan && <p className="text-sm text-slate-500">Nenhuma assinatura registrada. Se este cliente é cobrado fora do Asaas (ex: veio da planilha e ainda não pagou por link), cadastre o plano manualmente para que ele entre no MRR.</p>}
+        {subscriptions.length === 0 && !addingPlan && <p className="text-sm text-slate-500 dark:text-muted-foreground">Nenhuma assinatura registrada. Se este cliente é cobrado fora do Asaas (ex: veio da planilha e ainda não pagou por link), cadastre o plano manualmente para que ele entre no MRR.</p>}
         {addingPlan && <ManualSubscriptionForm customerId={customer.id} onDone={() => { setAddingPlan(false); onChanged(); }} onCancel={() => setAddingPlan(false)} />}
         {subscriptions.map((subscription) => (
-          <SubscriptionRow key={subscription.id} subscription={subscription} linkLabel={linkLabel(subscription.payment_link_id)} customizations={activeCustomizations(subscription.id, customer.id, events)} onChanged={onChanged} />
+          <SubscriptionRow key={subscription.id} subscription={subscription} customizations={activeCustomizations(subscription.id, customer.id, events)} onChanged={onChanged} />
         ))}
       </div>
 
-      <div className="space-y-2 rounded-xl border border-slate-200 p-3">
-        <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">Pagamentos ({payments.length})</p>
-        {payments.length === 0 && <p className="text-sm text-slate-500">Nenhum pagamento registrado ainda.</p>}
+      <div className="space-y-2 rounded-xl border border-slate-200 dark:border-border p-3">
+        <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500 dark:text-muted-foreground">Pagamentos ({payments.length})</p>
+        {payments.length === 0 && <p className="text-sm text-slate-500 dark:text-muted-foreground">Nenhum pagamento registrado ainda.</p>}
         <div className="max-h-48 space-y-1.5 overflow-y-auto">
           {payments.slice(0, 20).map((payment) => (
             <div key={payment.id} className="flex items-center justify-between gap-2 text-sm">
-              <span className={isPaidStatus(payment.status) ? "text-emerald-700" : "text-slate-500"}>{payment.status}</span>
-              <span className="text-slate-500">{fmtDate(payment.payment_date ?? payment.due_date)}</span>
+              <span className={isPaidStatus(payment.status) ? "text-emerald-700 dark:text-emerald-300" : "text-slate-500 dark:text-muted-foreground"}>{payment.status}</span>
+              <span className="text-slate-500 dark:text-muted-foreground">{fmtDate(payment.payment_date ?? payment.due_date)}</span>
               <span className="font-medium">{money.format(payment.value)}</span>
             </div>
           ))}
         </div>
       </div>
 
-      <div className="space-y-2 rounded-xl border border-violet-200 bg-violet-50/30 p-3">
+      <div className="space-y-2 rounded-xl border border-violet-200 dark:border-violet-900 bg-violet-50/30 p-3">
         <div className="flex items-center justify-between">
-          <p className="text-xs font-medium uppercase tracking-[0.14em] text-violet-700">Implantações ({implementationPayments.length})</p>
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-violet-700 dark:text-violet-300">Implantações ({implementationPayments.length})</p>
           <Button variant="outline" size="sm" onClick={() => setAddingImplementationPayment((current) => !current)}>{addingImplementationPayment ? "Cancelar" : "+ Registrar pagamento"}</Button>
         </div>
-        {implementationPayments.length === 0 && !addingImplementationPayment && <p className="text-sm text-slate-500">Nenhuma taxa de implantação/consultoria registrada para este cliente. Se o cliente pagou fora do Asaas (transferência, dinheiro etc.), registre manualmente.</p>}
+        {implementationPayments.length === 0 && !addingImplementationPayment && <p className="text-sm text-slate-500 dark:text-muted-foreground">Nenhuma taxa de implantação/consultoria registrada para este cliente. Se o cliente pagou fora do Asaas (transferência, dinheiro etc.), registre manualmente.</p>}
         {addingImplementationPayment && (
           <ManualImplementationPaymentForm
             customerId={customer.id}
@@ -388,13 +392,13 @@ function ClientDetail({ customer, subscriptions, payments, implementationPayment
             return (
             <div key={payment.id} className="text-sm">
               <div className="flex items-center justify-between gap-2">
-                <span className={isPaidStatus(payment.status) ? "text-emerald-700" : "text-slate-500"}>{payment.status}</span>
-                <span className="text-slate-500">{fmtDate(payment.payment_date ?? payment.due_date)}</span>
+                <span className={isPaidStatus(payment.status) ? "text-emerald-700 dark:text-emerald-300" : "text-slate-500 dark:text-muted-foreground"}>{payment.status}</span>
+                <span className="text-slate-500 dark:text-muted-foreground">{fmtDate(payment.payment_date ?? payment.due_date)}</span>
                 <span className="font-medium">{money.format(payment.value)}</span>
               </div>
-              <p className="flex items-center gap-1.5 truncate text-xs text-slate-500" title={payment.description}>
+              <p className="flex items-center gap-1.5 truncate text-xs text-slate-500 dark:text-muted-foreground" title={payment.description}>
                 {plan && <Badge variant="outline" className={`shrink-0 text-[10px] ${planBadgeClass(plan)}`}>{planKindLabels[plan.kind]}</Badge>}
-                {payment.source === "MANUAL" && <Badge variant="outline" className="shrink-0 text-[10px] border-slate-200 bg-slate-50 text-slate-500">Manual</Badge>}
+                {payment.source === "MANUAL" && <Badge variant="outline" className="shrink-0 text-[10px] border-slate-200 dark:border-border bg-slate-50 dark:bg-muted text-slate-500 dark:text-muted-foreground">Manual</Badge>}
                 <span className="truncate">{payment.description}</span>
               </p>
             </div>
@@ -403,8 +407,8 @@ function ClientDetail({ customer, subscriptions, payments, implementationPayment
         </div>
       </div>
 
-      <div className="space-y-3 rounded-xl border border-dashed border-slate-200 p-3">
-        <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">Editar cadastro</p>
+      <div className="space-y-3 rounded-xl border border-dashed border-slate-200 dark:border-border p-3">
+        <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500 dark:text-muted-foreground">Editar cadastro</p>
         <Select value={status ?? "UNSET"} onValueChange={(value) => setStatus(value as ConfirmedStatus)}>
           <SelectTrigger className="w-full"><SelectValue>{statusLabelOrUnset(status)}</SelectValue></SelectTrigger>
           <SelectContent>
@@ -435,7 +439,7 @@ function ClientDetail({ customer, subscriptions, payments, implementationPayment
 }
 
 /** One subscription card with an inline, auto-saving status editor — lets the operator manually confirm ACTIVE/FROZEN/CANCELLED for subscriptions that came out of the Set/2026 reset with no status at all. */
-function SubscriptionRow({ subscription, linkLabel, customizations, onChanged }: { subscription: Subscription; linkLabel: string | null; customizations: ActiveCustomization[]; onChanged: () => void }) {
+function SubscriptionRow({ subscription, customizations, onChanged }: { subscription: Subscription; customizations: ActiveCustomization[]; onChanged: () => void }) {
   const [saving, setSaving] = useState(false);
   async function setStatus(status: "ACTIVE" | "FROZEN" | "CANCELLED") {
     if (saving || status === subscription.status) return;
@@ -451,9 +455,9 @@ function SubscriptionRow({ subscription, linkLabel, customizations, onChanged }:
     }
   }
   return (
-    <div className="rounded-lg border border-slate-100 p-2.5 text-sm">
+    <div className="rounded-lg border border-slate-100 dark:border-border p-2.5 text-sm">
       <div className="flex items-center justify-between gap-2">
-        <span className="inline-flex items-center gap-1 font-medium">{subscription.plan_name_raw ?? "Plano"}<CustomizationHint items={customizations} /></span>
+        <span className="inline-flex items-center gap-1 font-medium">{subscription.display_plan_name ?? "—"}<CustomizationHint items={customizations} /></span>
         <Select disabled={saving} value={subscription.status ?? "UNSET"} onValueChange={(value) => setStatus(value as "ACTIVE" | "FROZEN" | "CANCELLED")}>
           <SelectTrigger className={"h-7 w-auto gap-1.5 border px-2 text-xs " + statusBadgeClassOrUnset(subscription.status)}><SelectValue>{statusLabelOrUnset(subscription.status)}</SelectValue></SelectTrigger>
           <SelectContent>
@@ -464,11 +468,12 @@ function SubscriptionRow({ subscription, linkLabel, customizations, onChanged }:
           </SelectContent>
         </Select>
       </div>
-      <p className="text-xs text-slate-500">{subscription.billing_period === "ANNUAL" ? "Anual" : "Mensal"} · {money.format(subscription.value)}{subscription.source === "LEGACY_IMPORT" ? " · importado" : subscription.source === "MANUAL" ? " · cadastrado manualmente" : ""}</p>
-      {linkLabel ? (
-        <p className="mt-1 text-xs font-medium text-[#3b82f6]">Pago via link: {linkLabel}</p>
+      {subscription.status !== "CANCELLED" && <Button variant="ghost" size="sm" disabled={saving} onClick={() => setStatus("CANCELLED")}>Desativar no painel</Button>}
+      <p className="text-xs text-slate-500 dark:text-muted-foreground">{subscription.billing_period === "ANNUAL" ? "Anual" : "Mensal"} · {money.format(subscription.value)}{subscription.source === "LEGACY_IMPORT" ? " · importado" : subscription.source === "MANUAL" ? " · cadastrado manualmente" : ""}</p>
+      {subscription.display_actor_label ? (
+        <p className="mt-1 text-xs font-medium text-[#3b82f6]">{subscription.display_actor_label}</p>
       ) : (
-        <p className="mt-1 text-xs text-slate-400">{subscription.source === "MANUAL" ? "Sem link de pagamento (cadastro manual)" : "Sem link de pagamento rastreado (venda direta/legado)"}</p>
+        <p className="mt-1 text-xs text-slate-400">{subscription.payment_link_id ? "Sem responsável comercial vinculado" : subscription.source === "MANUAL" ? "Cadastro manual" : "Venda direta / legado"}</p>
       )}
     </div>
   );
@@ -502,7 +507,7 @@ function ManualSubscriptionForm({ customerId, onDone, onCancel }: { customerId: 
 
   return (
     <div className="space-y-2 rounded-lg border border-dashed border-[#3b82f6] bg-blue-50/30 p-3">
-      <p className="text-xs text-slate-500">Use isto para clientes cobrados fora do Asaas (ex: entrou pela planilha e ainda não tem link de pagamento). Isso não gera cobrança nenhuma, só registra o plano para as métricas.</p>
+      <p className="text-xs text-slate-500 dark:text-muted-foreground">Use isto para clientes cobrados fora do Asaas (ex: entrou pela planilha e ainda não tem link de pagamento). Isso não gera cobrança nenhuma, só registra o plano para as métricas.</p>
       <Input placeholder="Nome do plano" value={planName} onChange={(event) => setPlanName(event.target.value)} />
       <div className="grid grid-cols-2 gap-2">
         <Select value={billingPeriod} onValueChange={(period) => setBillingPeriod(period as "MONTHLY" | "ANNUAL")}>
@@ -571,7 +576,7 @@ function ManualImplementationPaymentForm({ customerId, plans, actors, onDone, on
 
   return (
     <div className="space-y-2 rounded-lg border border-dashed border-violet-400 bg-violet-50/50 p-3">
-      <p className="text-xs text-slate-500">Use isto para uma implantação ou consultoria paga fora do Asaas (transferência, dinheiro etc.). Não gera cobrança nenhuma, só registra o recebimento — nunca entra no MRR/assinaturas.</p>
+      <p className="text-xs text-slate-500 dark:text-muted-foreground">Use isto para uma implantação ou consultoria paga fora do Asaas (transferência, dinheiro etc.). Não gera cobrança nenhuma, só registra o recebimento — nunca entra no MRR/assinaturas.</p>
       <Select value={planId} onValueChange={onPlanChange}>
         <SelectTrigger className="w-full"><SelectValue placeholder="Plano (opcional)" /></SelectTrigger>
         <SelectContent>

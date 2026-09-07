@@ -1,3 +1,4 @@
+import { presentSubscription, type SubscriptionWithRelations } from "@/lib/subscription-presentation";
 import { readCustomerActivities } from "@/lib/customer-activity-server";
 import { effectiveSubscriptions } from "@/lib/customer-activity";
 import type { Subscription } from "@/lib/metrics";
@@ -7,14 +8,14 @@ export async function GET(request: Request) {
   try {
     const params = new URL(request.url).searchParams;
     const filters = [
-      "select=*",
+      "select=*,plans(name),actor_custom_plans(name),commercial_actors(id,name,role,tier),payment_links(plans(name),actor_custom_plans(name),commercial_actors(id,name,role,tier))",
       params.get("actorId") ? `actor_id=eq.${encodeURIComponent(params.get("actorId")!)}` : null,
       params.get("customerId") ? `customer_id=eq.${encodeURIComponent(params.get("customerId")!)}` : null,
       params.get("paymentLinkId") ? `payment_link_id=eq.${encodeURIComponent(params.get("paymentLinkId")!)}` : null,
       "order=created_at.desc",
     ].filter(Boolean).join("&");
-    const subscriptions = await supabaseRequest<Subscription[]>(`/rest/v1/subscriptions?${filters}`);
-    return Response.json({ subscriptions: effectiveSubscriptions(subscriptions, await readCustomerActivities()) });
+    const subscriptions = await supabaseRequest<SubscriptionWithRelations[]>(`/rest/v1/subscriptions?${filters}`);
+    return Response.json({ subscriptions: effectiveSubscriptions(subscriptions, await readCustomerActivities()).map(presentSubscription) });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Erro ao consultar assinaturas." }, { status: 500 });
   }
@@ -76,7 +77,7 @@ export async function PATCH(request: Request) {
     const payload = (await request.json()) as { id?: string; status?: "ACTIVE" | "FROZEN" | "CANCELLED" };
     if (!payload.id) return Response.json({ error: "Informe a assinatura." }, { status: 400 });
     if (payload.status !== "ACTIVE" && payload.status !== "FROZEN" && payload.status !== "CANCELLED") return Response.json({ error: "Status inválido." }, { status: 400 });
-    const body: Record<string, unknown> = { status: payload.status, cancelled_at: payload.status === "CANCELLED" ? new Date().toISOString().slice(0, 10) : null };
+    const body: Record<string, unknown> = { status: payload.status, status_manually_set: true, cancelled_at: payload.status === "CANCELLED" ? new Date().toISOString().slice(0, 10) : null };
     const [updated] = await supabaseRequest<Subscription[]>(`/rest/v1/subscriptions?id=eq.${payload.id}`, { method: "PATCH", prefer: "return=representation", body });
     if (!updated) return Response.json({ error: "Assinatura não encontrada." }, { status: 404 });
     return Response.json({ subscription: updated });

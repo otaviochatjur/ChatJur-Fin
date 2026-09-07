@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ColumnVisibilityMenu, ResizableTh, useColumnVisibility, useColumnWidths, type ColumnDef } from "@/components/dashboard/table-toolbar";
+import { ColumnVisibilityMenu, ResizableTh, useTableSort, useColumnVisibility, useColumnWidths, type ColumnDef } from "@/components/dashboard/table-toolbar";
 import { downloadBrandedPdf, downloadBrandedXlsx, seededRandom } from "@/lib/reports";
 import {
   computeActorPayout,
@@ -148,6 +148,7 @@ export function PayoutsSection({ actors, subscriptions, payments, customers }: {
   const [nameSearch, setNameSearch] = useState("");
   const columns = useColumnVisibility(payoutColumns);
   const widths = useColumnWidths(payoutColumns);
+  const sorting = useTableSort();
   const [reportFormat, setReportFormat] = useState<"pdf" | "xlsx">("pdf");
   const [demoMode, setDemoMode] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -366,28 +367,28 @@ export function PayoutsSection({ actors, subscriptions, payments, customers }: {
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex gap-1.5 rounded-xl bg-slate-100 p-1">
+        <div className="flex gap-1.5 rounded-xl bg-slate-100 dark:bg-muted p-1">
           {ROLE_TABS.map((tab) => (
-            <button key={tab} onClick={() => setRole(tab)} className={`rounded-lg px-3.5 py-1.5 text-sm font-medium transition ${role === tab ? "bg-white text-[#3a5d9d] shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
+            <button key={tab} onClick={() => setRole(tab)} className={`rounded-lg px-3.5 py-1.5 text-sm font-medium transition ${role === tab ? "bg-white dark:bg-card text-primary shadow-sm" : "text-slate-500 dark:text-muted-foreground hover:text-slate-700 dark:hover:text-foreground"}`}>
               {rolePluralLabels[tab]}
             </button>
           ))}
         </div>
-        <label className="flex items-center gap-2 text-sm text-slate-600">
+        <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-muted-foreground">
           Período
           <Input type="month" value={period} onChange={(event) => setPeriod(event.target.value)} className="w-40" />
         </label>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-3">
-        <div className="rounded-2xl border border-slate-200 bg-white p-4"><p className="text-xs text-slate-500">Comissão calculada — {periodLabel(period)}</p><p className="mt-1 text-xl font-semibold">{money.format(totalComputed)}</p></div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-4"><p className="text-xs text-slate-500">Já repassado neste período</p><p className="mt-1 text-xl font-semibold text-[#3b82f6]">{money.format(totalPaid)}</p></div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-4"><p className="text-xs text-slate-500">Pendentes de repasse</p><p className="mt-1 text-xl font-semibold">{pendingCount}</p></div>
+        <div className="rounded-2xl border border-slate-200 dark:border-border bg-white dark:bg-card p-4"><p className="text-xs text-slate-500 dark:text-muted-foreground">Comissão calculada — {periodLabel(period)}</p><p className="mt-1 text-xl font-semibold">{money.format(totalComputed)}</p></div>
+        <div className="rounded-2xl border border-slate-200 dark:border-border bg-white dark:bg-card p-4"><p className="text-xs text-slate-500 dark:text-muted-foreground">Já repassado neste período</p><p className="mt-1 text-xl font-semibold text-[#3b82f6]">{money.format(totalPaid)}</p></div>
+        <div className="rounded-2xl border border-slate-200 dark:border-border bg-white dark:bg-card p-4"><p className="text-xs text-slate-500 dark:text-muted-foreground">Pendentes de repasse</p><p className="mt-1 text-xl font-semibold">{pendingCount}</p></div>
       </div>
 
-      <div className="space-y-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-3.5">
+      <div className="space-y-3 rounded-2xl border border-dashed border-slate-300 dark:border-input bg-slate-50 dark:bg-muted p-3.5">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-slate-600">{selectedActorIds.size} selecionado(s) para relatório (a seleção vale para todas as categorias, não só a aba atual)</p>
+          <p className="text-sm text-slate-600 dark:text-muted-foreground">{selectedActorIds.size} selecionado(s) para relatório (a seleção vale para todas as categorias, não só a aba atual)</p>
           <Select value={reportFormat} onValueChange={(value) => setReportFormat(value as "pdf" | "xlsx")}>
             <SelectTrigger className="h-8 w-36 text-xs"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -397,7 +398,7 @@ export function PayoutsSection({ actors, subscriptions, payments, customers }: {
           </Select>
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <label className="flex max-w-md items-center gap-2 text-xs text-slate-500">
+          <label className="flex max-w-md items-center gap-2 text-xs text-slate-500 dark:text-muted-foreground">
             <Switch checked={demoMode} onCheckedChange={setDemoMode} />
             Usar dados fictícios (demonstração) — gera números de exemplo para {rolePluralLabels[role].toLowerCase()}, ignorando a seleção. Útil para ver o layout antes de preencher os dados reais.
           </label>
@@ -408,14 +409,14 @@ export function PayoutsSection({ actors, subscriptions, payments, customers }: {
         </div>
       </div>
 
-      <section className="rounded-2xl border border-slate-200 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.04)]">
-        <div className="border-b border-slate-100 p-5">
+      <section className="rounded-2xl border border-slate-200 dark:border-border bg-white dark:bg-card shadow-[0_10px_30px_rgba(15,23,42,0.04)]">
+        <div className="border-b border-slate-100 dark:border-border p-5">
           <h2 className="font-semibold">Repasses — {rolePluralLabels[role]}</h2>
-          <p className="mt-1 text-sm text-slate-500">% de comissão sobre o MRR do plano. Anual: distribuída pelos 12 meses do ciclo enquanto a assinatura estiver ativa, independente de ter sido pago em 1x, 8x, 10x ou 12x. Mensal: só no mês em que o pagamento é confirmado.</p>
+          <p className="mt-1 text-sm text-slate-500 dark:text-muted-foreground">% de comissão sobre o MRR do plano. Anual: distribuída pelos 12 meses do ciclo enquanto a assinatura estiver ativa, independente de ter sido pago em 1x, 8x, 10x ou 12x. Mensal: só no mês em que o pagamento é confirmado.</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 p-4">
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 dark:border-border p-4">
           {payoutStatusFilters.map((value) => (
-            <button key={value} onClick={() => setPayoutStatusFilter(value)} className={`rounded-lg px-3 py-1.5 text-sm ${payoutStatusFilter === value ? "bg-[#eaf1fc] text-[#2c4a80]" : "text-slate-500 hover:bg-slate-50"}`}>
+            <button key={value} onClick={() => setPayoutStatusFilter(value)} className={`rounded-lg px-3 py-1.5 text-sm ${payoutStatusFilter === value ? "bg-accent text-accent-foreground" : "text-slate-500 dark:text-muted-foreground hover:bg-slate-50 dark:hover:bg-muted"}`}>
               {payoutStatusFilterLabels[value]}
             </button>
           ))}
@@ -426,22 +427,22 @@ export function PayoutsSection({ actors, subscriptions, payments, customers }: {
           <TableHeader>
             <TableRow>
               <TableHead className="w-10"><Checkbox checked={allVisibleSelected} onCheckedChange={toggleAllVisible} /></TableHead>
-              <ResizableTh width={widths.getWidth("name", 220)} onResizeStart={widths.startResize("name", 220)}>Nome</ResizableTh>
-              {columns.isVisible("received") && <ResizableTh width={widths.getWidth("received")} onResizeStart={widths.startResize("received")} className="text-right">Recebido no período</ResizableTh>}
-              {columns.isVisible("commission") && <ResizableTh width={widths.getWidth("commission")} onResizeStart={widths.startResize("commission")} className="text-right">Comissão calculada</ResizableTh>}
-              {columns.isVisible("status") && <ResizableTh width={widths.getWidth("status")} onResizeStart={widths.startResize("status")}>Status</ResizableTh>}
+              <ResizableTh {...sorting.header("name")} width={widths.getWidth("name", 220)} onResizeStart={widths.startResize("name", 220)}>Nome</ResizableTh>
+              {columns.isVisible("received") && <ResizableTh {...sorting.header("received")} width={widths.getWidth("received")} onResizeStart={widths.startResize("received")} className="text-right">Recebido no período</ResizableTh>}
+              {columns.isVisible("commission") && <ResizableTh {...sorting.header("commission")} width={widths.getWidth("commission")} onResizeStart={widths.startResize("commission")} className="text-right">Comissão calculada</ResizableTh>}
+              {columns.isVisible("status") && <ResizableTh {...sorting.header("status")} width={widths.getWidth("status")} onResizeStart={widths.startResize("status")}>Status</ResizableTh>}
               <TableHead className="w-[300px]" />
             </TableRow>
           </TableHeader>
           <TableBody>
-            {visibleRows.length === 0 && <TableRow><TableCell colSpan={columns.visibleCount + 3} className="text-center text-sm text-slate-500">Nenhum registro em {rolePluralLabels[role].toLowerCase()} nesse filtro.</TableCell></TableRow>}
-            {visibleRows.map(({ actor, computed, paidRecord }) => (
+            {visibleRows.length === 0 && <TableRow><TableCell colSpan={columns.visibleCount + 3} className="text-center text-sm text-slate-500 dark:text-muted-foreground">Nenhum registro em {rolePluralLabels[role].toLowerCase()} nesse filtro.</TableCell></TableRow>}
+            {sorting.rows(visibleRows, row => ({ name: row.actor.name, received: row.computed.grossReceived, commission: row.computed.commission, status: row.paidRecord ? "Pago" : "Pendente" })).map(({ actor, computed, paidRecord }) => (
               <TableRow key={actor.id}>
                 <TableCell><Checkbox checked={selectedActorIds.has(actor.id)} onCheckedChange={(checked) => toggleActorSelected(actor.id, checked === true)} /></TableCell>
                 <TableCell>
                   <p className="font-medium">{actor.name}</p>
                   {computed.untaxedCount > 0 && (
-                    <p className="mt-0.5 flex items-center gap-1 text-xs text-amber-600"><TriangleAlert className="size-3" />{computed.untaxedCount} pagamento(s) sem taxa definida (não incluídos)</p>
+                    <p className="mt-0.5 flex items-center gap-1 text-xs text-amber-600 dark:text-amber-300"><TriangleAlert className="size-3" />{computed.untaxedCount} pagamento(s) sem taxa definida (não incluídos)</p>
                   )}
                 </TableCell>
                 {columns.isVisible("received") && <TableCell className="text-right">{money.format(computed.grossReceived)}</TableCell>}
@@ -451,7 +452,7 @@ export function PayoutsSection({ actors, subscriptions, payments, customers }: {
                     {paidRecord ? (
                       <Badge variant="outline" className="border-[#3b82f6]/30 text-[#3b82f6]">Pago em {new Date(paidRecord.paid_at).toLocaleDateString("pt-BR")} · {money.format(paidRecord.amount)}</Badge>
                     ) : (
-                      <Badge variant="outline" className="text-slate-500">Pendente</Badge>
+                      <Badge variant="outline" className="text-slate-500 dark:text-muted-foreground">Pendente</Badge>
                     )}
                   </TableCell>
                 )}
@@ -482,7 +483,7 @@ export function PayoutsSection({ actors, subscriptions, payments, customers }: {
           </DialogHeader>
           <div className="space-y-3">
             <div className="flex items-center gap-2">
-              <span className="text-sm text-slate-500">R$</span>
+              <span className="text-sm text-slate-500 dark:text-muted-foreground">R$</span>
               <Input type="number" step="0.01" value={dialogAmount} onChange={(event) => setDialogAmount(event.target.value)} />
             </div>
             <Input value={dialogNotes} onChange={(event) => setDialogNotes(event.target.value)} placeholder="Observação (opcional)" />
@@ -498,15 +499,15 @@ export function PayoutsSection({ actors, subscriptions, payments, customers }: {
             <DialogDescription>Todos os meses já marcados como pagos.</DialogDescription>
           </DialogHeader>
           <div className="max-h-80 space-y-2 overflow-y-auto">
-            {historyRows.length === 0 && <p className="text-sm text-slate-500">Nenhum repasse pago ainda.</p>}
+            {historyRows.length === 0 && <p className="text-sm text-slate-500 dark:text-muted-foreground">Nenhum repasse pago ainda.</p>}
             {historyRows.map((payout) => (
-              <div key={payout.id} className="rounded-lg border border-slate-100 p-2.5 text-sm">
+              <div key={payout.id} className="rounded-lg border border-slate-100 dark:border-border p-2.5 text-sm">
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-medium">{periodLabel(payout.reference_month.slice(0, 7))}</span>
                   <span className="font-medium text-[#3b82f6]">{money.format(payout.amount)}</span>
                 </div>
-                <p className="text-xs text-slate-500">Pago em {new Date(payout.paid_at).toLocaleDateString("pt-BR")}{payout.computed_amount !== payout.amount ? ` · calculado: ${money.format(payout.computed_amount)}` : ""}</p>
-                {payout.notes && <p className="mt-1 text-xs text-slate-500">{payout.notes}</p>}
+                <p className="text-xs text-slate-500 dark:text-muted-foreground">Pago em {new Date(payout.paid_at).toLocaleDateString("pt-BR")}{payout.computed_amount !== payout.amount ? ` · calculado: ${money.format(payout.computed_amount)}` : ""}</p>
+                {payout.notes && <p className="mt-1 text-xs text-slate-500 dark:text-muted-foreground">{payout.notes}</p>}
               </div>
             ))}
           </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Columns3 } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Columns3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -150,13 +150,15 @@ export function useColumnWidths<K extends string = string>(defs: readonly Column
  * `table-fixed`) — with that, the header row's widths are what the browser
  * uses to size every column, so body `<TableCell>`s don't need any changes.
  */
-export function ResizableTh({ width, onResizeStart, className, children, ...props }: React.ComponentProps<typeof TableHead> & {
+export function ResizableTh({ width, onResizeStart, sortDirection, onSort, className, children, ...props }: React.ComponentProps<typeof TableHead> & {
+  sortDirection?: "ascending" | "descending" | "none";
+  onSort?: () => void;
   width: number;
   onResizeStart: (event: React.MouseEvent<HTMLElement>) => void;
 }) {
   return (
-    <TableHead style={{ width, minWidth: width, maxWidth: width }} className={cn("relative pr-3", className)} {...props}>
-      {children}
+    <TableHead aria-sort={onSort ? sortDirection : undefined} style={{ width, minWidth: width, maxWidth: width }} className={cn("relative pr-3", className)} {...props}>
+      {onSort ? <button type="button" onClick={onSort} className="inline-flex max-w-full items-center gap-1.5 rounded py-2 text-inherit hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" title="Clique para alternar a ordenação"><span className="truncate">{children}</span>{sortDirection === "ascending" ? <ArrowUp className="size-3.5 shrink-0 text-primary" /> : sortDirection === "descending" ? <ArrowDown className="size-3.5 shrink-0 text-primary" /> : <ArrowUpDown className="size-3.5 shrink-0 opacity-40" />}</button> : children}
       <span
         onMouseDown={onResizeStart}
         onDoubleClick={(event) => event.stopPropagation()}
@@ -167,4 +169,27 @@ export function ResizableTh({ width, onResizeStart, className, children, ...prop
       />
     </TableHead>
   );
+}
+
+export type SortValue = string | number | null | undefined;
+const collator = new Intl.Collator("pt-BR", { numeric: true, sensitivity: "base" });
+export function sortTableRows<T>(rows: readonly T[], value: (row: T) => SortValue, descending = false): T[] {
+  return rows.map((row, index) => ({ row, index, value: value(row) })).sort((a, b) => {
+    const emptyA = a.value == null || a.value === "" || (typeof a.value === "number" && !Number.isFinite(a.value));
+    const emptyB = b.value == null || b.value === "" || (typeof b.value === "number" && !Number.isFinite(b.value));
+    if (emptyA || emptyB) return emptyA === emptyB ? a.index - b.index : emptyA ? 1 : -1;
+    const compared = typeof a.value === "number" && typeof b.value === "number" ? a.value - b.value : collator.compare(String(a.value), String(b.value));
+    return (descending ? -compared : compared) || a.index - b.index;
+  }).map(item => item.row);
+}
+export function useTableSort() {
+  const [sort, setSort] = useState<{ key: string; descending: boolean } | null>(null);
+  return {
+    header: (key: string) => ({
+      sortDirection: (sort?.key === key ? sort.descending ? "descending" : "ascending" : "none") as "ascending" | "descending" | "none",
+      onSort: () => setSort(current => ({ key, descending: current?.key === key ? !current.descending : false })),
+    }),
+    rows: <T,>(rows: readonly T[], values: (row: T) => Record<string, SortValue>): readonly T[] =>
+      sort ? sortTableRows(rows, row => values(row)[sort.key], sort.descending) : rows,
+  };
 }

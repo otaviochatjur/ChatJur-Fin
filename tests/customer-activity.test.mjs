@@ -3,7 +3,7 @@ import test, { after } from "node:test";
 import { createServer } from "vite";
 import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("..", import.meta.url));
-const vite = await createServer({ appType: "custom", configFile: false, root, resolve: { alias: { "@": root } }, server: { middlewareMode: true } });
+const vite = await createServer({ appType: "custom", cacheDir: "node_modules/.vite-tests/customer-activity", configFile: false, root, resolve: { alias: { "@": root } }, server: { middlewareMode: true, hmr: false } });
 after(() => vite.close());
 const { activitySchema, summarizeActivities } = await vite.ssrLoadModule("/lib/customer-activity.ts");
 const subscriptionId = "00000000-0000-4000-8000-000000000003";
@@ -59,7 +59,7 @@ test("persists records and reads all pages without losing older events", async (
     return Response.json(stored.slice(offset, offset + 500));
   };
   try {
-    const { POST, GET } = await vite.ssrLoadModule("/app/api/customer-activities/route.ts");
+    const { POST, GET } = await activityRoutes();
     const response = await POST(new Request("http://localhost/api/customer-activities", { method: "POST", body: JSON.stringify({ ...valid, items: [{ kind: "USERS", quantity: 3, amount: 120 }] }) }));
     assert.equal(response.status, 201);
     const saved = (await response.json()).event;
@@ -95,7 +95,7 @@ test("lets operators edit and delete a stored activity", async () => {
     return Response.json([]);
   };
   try {
-    const { PATCH, DELETE } = await vite.ssrLoadModule("/app/api/customer-activities/route.ts");
+    const { PATCH, DELETE } = await activityRoutes();
     const patched = await PATCH(new Request("http://localhost/api/customer-activities", { method: "PATCH", body: JSON.stringify({ id: "e1", customerId: valid.customerId, type: "RENEWAL", occurredOn: "2026-09-05", amount: 1800, notes: "Ajustado" }) }));
     assert.equal(patched.status, 200);
     const edited = (await patched.json()).event;
@@ -145,14 +145,14 @@ test("auto-updates the customer's status when logging a cancellation or a reacti
     return Response.json([]);
   };
   try {
-    const { POST } = await vite.ssrLoadModule("/app/api/customer-activities/route.ts");
+    const { POST } = await activityRoutes();
     const cancelled = await POST(new Request("http://localhost/api/customer-activities", { method: "POST", body: JSON.stringify({ customerId: valid.customerId, type: "CANCELLATION", occurredOn: "2026-09-06", amount: 0, notes: "Cliente insatisfeito com o preço" }) }));
     assert.equal(cancelled.status, 201);
-    assert.deepEqual(customerPatches[0], { status: "CANCELLED", cancelled_at: "2026-09-06", cancellation_reason: "Cliente insatisfeito com o preço" });
+    assert.deepEqual(customerPatches[0], { tenant_id: "00000000-0000-4000-8000-000000000099", status: "CANCELLED", cancelled_at: "2026-09-06", cancellation_reason: "Cliente insatisfeito com o preço" });
 
     const reactivated = await POST(new Request("http://localhost/api/customer-activities", { method: "POST", body: JSON.stringify({ customerId: valid.customerId, type: "REACTIVATION", occurredOn: "2026-10-01", amount: 397, notes: "" }) }));
     assert.equal(reactivated.status, 201);
-    assert.deepEqual(customerPatches[1], { status: "ACTIVE", cancelled_at: null });
+    assert.deepEqual(customerPatches[1], { tenant_id: "00000000-0000-4000-8000-000000000099", status: "ACTIVE", cancelled_at: null });
 
     // Other activity types must not touch customers.status at all.
     const followUp = await POST(new Request("http://localhost/api/customer-activities", { method: "POST", body: JSON.stringify({ customerId: valid.customerId, type: "FOLLOW_UP", occurredOn: "2026-10-02", amount: 0, notes: "Ligação de retenção" }) }));
@@ -257,3 +257,10 @@ test("upsells and downsells add/subtract their monthly amount from the affected 
   const other = [{ id: "00000000-0000-4000-8000-000000000006", customer_id: valid.customerId, billing_period: "MONTHLY", plan_name_raw: "Outro", value: 100 }];
   assert.equal(effectiveSubscriptions(other, [upsell], "2026-09-10")[0], other[0]);
 });
+
+async function activityRoutes() {
+  const routes = await vite.ssrLoadModule("/app/api/customer-activities/route.ts");
+  const { withWebhookTenant } = await vite.ssrLoadModule("/lib/tenant-server.ts");
+  const tenant = { id: "00000000-0000-4000-8000-000000000099", legacy: false, owner_user_id: null, reserved_email: null };
+  return Object.fromEntries(Object.entries(routes).map(([name, method]) => [name, (...args) => withWebhookTenant(tenant, () => method(...args))]));
+}

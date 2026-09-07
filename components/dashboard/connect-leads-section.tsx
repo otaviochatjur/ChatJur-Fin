@@ -81,32 +81,32 @@ export function ConnectLeadsSection({ leads, onChanged }: { leads: ConnectLead[]
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div><h2 className="font-semibold">Candidaturas do Chat Jurídico Connect</h2><p className="mt-1 text-sm text-slate-500">Respostas do formulário público — classifique manualmente cada candidato</p></div>
-        <div className="flex gap-1.5 rounded-full bg-slate-100 p-1">
+        <div><h2 className="font-semibold">Candidaturas do Chat Jurídico Connect</h2><p className="mt-1 text-sm text-slate-500 dark:text-muted-foreground">Respostas do formulário público — classifique manualmente cada candidato</p></div>
+        <div className="flex gap-1.5 rounded-full bg-slate-100 dark:bg-muted p-1">
           {statusFilters.map((status) => (
-            <button key={status} onClick={() => setStatusFilter(status)} className={`rounded-full px-3 py-1 text-xs font-medium transition ${statusFilter === status ? "bg-white text-[#3a5d9d] shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
+            <button key={status} onClick={() => setStatusFilter(status)} className={`rounded-full px-3 py-1 text-xs font-medium transition ${statusFilter === status ? "bg-white dark:bg-card text-primary shadow-sm" : "text-slate-500 dark:text-muted-foreground hover:text-slate-700 dark:hover:text-foreground"}`}>
               {statusLabels[status]}
             </button>
           ))}
         </div>
       </div>
 
-      {filtered.length === 0 && <p className="rounded-2xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500">Nenhuma candidatura {statusFilter !== "ALL" ? statusLabels[statusFilter].toLowerCase() : ""} por aqui ainda.</p>}
+      {filtered.length === 0 && <p className="rounded-2xl border border-dashed border-slate-200 dark:border-border p-6 text-center text-sm text-slate-500 dark:text-muted-foreground">Nenhuma candidatura {statusFilter !== "ALL" ? statusLabels[statusFilter].toLowerCase() : ""} por aqui ainda.</p>}
 
       <div className="space-y-3">
         {filtered.map((lead) => {
           const socials = socialLinks(lead);
           return (
-            <div key={lead.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.04)]">
+            <div key={lead.id} className="rounded-2xl border border-slate-200 dark:border-border bg-white dark:bg-card p-4 shadow-[0_10px_30px_rgba(15,23,42,0.04)]">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <div className="flex items-center gap-2">
                     <p className="font-medium">{lead.full_name ?? "Sem nome"}</p>
                     {lead.applicant_type && <Badge variant="outline">{lead.applicant_type}</Badge>}
                     {lead.status === "APPROVED" && <Badge className="bg-[#3b82f6]">Aprovada como {lead.classified_as ? roleLabels[lead.classified_as] : "—"}</Badge>}
-                    {lead.status === "REJECTED" && <Badge variant="outline" className="text-red-600">Reprovada</Badge>}
+                    {lead.status === "REJECTED" && <Badge variant="outline" className="text-red-600 dark:text-red-300">Reprovada</Badge>}
                   </div>
-                  <p className="mt-1 text-xs text-slate-500">{[lead.email, lead.whatsapp].filter(Boolean).join(" · ") || "Sem contato informado"}</p>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-muted-foreground">{[lead.email, lead.whatsapp].filter(Boolean).join(" · ") || "Sem contato informado"}</p>
                   <p className="mt-1 text-xs text-slate-400">Recebida em {new Date(lead.created_at).toLocaleDateString("pt-BR")}</p>
                 </div>
                 {lead.status === "PENDING" && (
@@ -124,17 +124,17 @@ export function ConnectLeadsSection({ leads, onChanged }: { leads: ConnectLead[]
               )}
 
               {(lead.main_channel_audience_size || lead.office_network_size) && (
-                <p className="mt-2 text-xs text-slate-500">Alcance: {[lead.main_channel && `${lead.main_channel} (${lead.main_channel_audience_size ?? "?"})`, lead.office_network_size && `rede de escritórios: ${lead.office_network_size}`].filter(Boolean).join(" · ")}</p>
+                <p className="mt-2 text-xs text-slate-500 dark:text-muted-foreground">Alcance: {[lead.main_channel && `${lead.main_channel} (${lead.main_channel_audience_size ?? "?"})`, lead.office_network_size && `rede de escritórios: ${lead.office_network_size}`].filter(Boolean).join(" · ")}</p>
               )}
 
               {(lead.motivation_why || lead.motivation_success_view) && (
-                <div className="mt-3 space-y-1.5 rounded-xl bg-slate-50 p-3 text-sm">
+                <div className="mt-3 space-y-1.5 rounded-xl bg-slate-50 dark:bg-muted p-3 text-sm">
                   {lead.motivation_why && <p><span className="font-medium">Por que quer participar: </span>{lead.motivation_why}</p>}
                   {lead.motivation_success_view && <p><span className="font-medium">Parceria de sucesso: </span>{lead.motivation_success_view}</p>}
                 </div>
               )}
 
-              {lead.reviewed_notes && <p className="mt-2 text-xs text-slate-500">Observações da revisão: {lead.reviewed_notes}</p>}
+              {lead.reviewed_notes && <p className="mt-2 text-xs text-slate-500 dark:text-muted-foreground">Observações da revisão: {lead.reviewed_notes}</p>}
             </div>
           );
         })}

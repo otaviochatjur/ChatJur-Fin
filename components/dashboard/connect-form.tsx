@@ -20,10 +20,10 @@ export function ConnectForm() {
   }, []);
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_10px_30px_rgba(15,23,42,0.04)]">
+    <section className="rounded-2xl border border-slate-200 dark:border-border bg-white dark:bg-card p-6 shadow-[0_10px_30px_rgba(15,23,42,0.04)]">
       <div className="mb-4">
         <h2 className="text-lg font-semibold">Quer se conectar ao Chat Jurídico?</h2>
-        <p className="mt-1 text-sm text-slate-500">Preencha seus dados e nosso time avaliará o formato de parceria mais adequado.</p>
+        <p className="mt-1 text-sm text-slate-500 dark:text-muted-foreground">Preencha seus dados e nosso time avaliará o formato de parceria mais adequado.</p>
       </div>
       <iframe
         src="https://tally.so/embed/2EWBOV?alignLeft=1&hideTitle=1&transparentBackground=1&dynamicHeight=1"

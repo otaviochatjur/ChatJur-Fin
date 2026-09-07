@@ -171,6 +171,10 @@ export type Customer = {
 };
 
 export type Subscription = {
+  status_manually_set?: boolean;
+  display_plan_name?: string;
+  display_actor_id?: string | null;
+  display_actor_label?: string | null;
   id: string;
   customer_id: string;
   plan_id: string | null;

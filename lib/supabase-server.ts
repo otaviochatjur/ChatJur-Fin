@@ -1,3 +1,5 @@
+import { currentTenant, isWebhookRequest } from "./tenant-server";
+import { requireUser } from "./auth-server";
 type SupabaseRequestOptions = {
   method?: "GET" | "POST" | "PATCH" | "DELETE";
   body?: unknown;
@@ -26,17 +28,25 @@ export async function supabaseRequest<T>(path: string, options: SupabaseRequestO
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !serviceRoleKey) throw new Error("Supabase não configurado no servidor.");
 
+  const tenant = await currentTenant();
+  const scopedUrl = new URL(path, url);
+  if (scopedUrl.origin !== new URL(url).origin || !scopedUrl.pathname.startsWith("/rest/v1/")) throw new Error("Consulta inválida.");
+  scopedUrl.searchParams.set("tenant_id", "eq." + tenant.id);
+  const token = isWebhookRequest() ? serviceRoleKey : (await requireUser()).accessToken;
+  const scopedBody = options.body === undefined ? undefined : Array.isArray(options.body)
+    ? options.body.map(row => ({ ...row, tenant_id: tenant.id }))
+    : { ...(options.body as Record<string, unknown>), tenant_id: tenant.id };
   const maxAttempts = 4;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const response = await fetch(`${url.replace(/\/$/, "")}${path}`, {
+    const response = await fetch(scopedUrl, {
       method: options.method ?? "GET",
       headers: {
         apikey: serviceRoleKey,
-        Authorization: `Bearer ${serviceRoleKey}`,
+        Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
         ...(options.prefer ? { Prefer: options.prefer } : {}),
       },
-      ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
+      ...(options.body === undefined ? {} : { body: JSON.stringify(scopedBody) }),
     });
 
     const text = await response.text();

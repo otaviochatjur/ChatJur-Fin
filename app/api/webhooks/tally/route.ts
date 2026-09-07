@@ -1,3 +1,5 @@
+import { openSecret, type Integration } from "@/lib/integrations-server";
+import { adminRequest, withWebhookTenant, type Tenant } from "@/lib/tenant-server";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { supabaseRequest } from "@/lib/supabase-server";
 
@@ -183,10 +185,10 @@ function mapTallyFieldsToLead(fields: TallyField[]): Record<string, unknown> {
  * strategy and its limitations.
  *
  * Configure this route's public URL + a signing secret in Tally (form →
- * Integrations → Webhooks) and set the same value as TALLY_WEBHOOK_SECRET.
+ * Integrations → Webhooks) and save the same value in Integrations → Tally. The environment secret
+ * remains a fallback for the original shared form.
  */
-export async function POST(request: Request) {
-  const secret = process.env.TALLY_WEBHOOK_SECRET;
+async function handleWebhook(request: Request, secret: string, formId?: string | null) {
   const rawBody = await request.text();
 
   if (secret) {
@@ -205,7 +207,9 @@ export async function POST(request: Request) {
 
   if (body.eventType !== "FORM_RESPONSE" || !body.data) return Response.json({ received: true });
 
-  const submissionId = body.data.submissionId ?? body.data.responseId ?? null;
+  if (formId && body.data.formId !== formId) return Response.json({ error: "Formulário não autorizado." }, { status: 403 });
+  const submissionId = body.data.submissionId ?? body.data.responseId;
+  if (!submissionId) return Response.json({ error: "Resposta sem identificador." }, { status: 400 });
 
   try {
     // Idempotency: Tally retries on any non-2xx response, and can also
@@ -239,4 +243,24 @@ export async function POST(request: Request) {
     console.error("Erro ao processar webhook do Tally:", error);
     return Response.json({ error: error instanceof Error ? error.message : "Erro ao processar candidatura." }, { status: 500 });
   }
+}
+
+export async function POST(request: Request) {
+  try {
+    const account = new URL(request.url).searchParams.get("account");
+    if (account) {
+      if (!/^[a-f0-9-]{36}$/i.test(account)) return Response.json({ error: "Conta inválida." }, { status: 400 });
+      const [integration] = await adminRequest<Integration[]>(`/rest/v1/nexo_integrations?provider=eq.tally&tenant_id=eq.${account}&select=*`);
+      if (!integration) return Response.json({ error: "Webhook não configurado." }, { status: 503 });
+      const [tenant] = await adminRequest<Tenant[]>(`/rest/v1/nexo_tenants?id=eq.${account}&select=*`);
+      if (!tenant) return Response.json({ error: "Base não configurada." }, { status: 503 });
+      const secret = openSecret(integration.encrypted_key, tenant.id, "tally");
+      return withWebhookTenant(tenant, () => handleWebhook(request, secret, integration.account_id));
+    }
+    const secret = process.env.TALLY_WEBHOOK_SECRET;
+    if (!secret) return Response.json({ error: "Webhook não configurado." }, { status: 503 });
+    const [tenant] = await adminRequest<Tenant[]>("/rest/v1/nexo_tenants?legacy=eq.true&select=*");
+    if (!tenant) return Response.json({ error: "Base não configurada." }, { status: 503 });
+    return withWebhookTenant(tenant, () => handleWebhook(request, secret));
+  } catch { return Response.json({ error: "Não foi possível receber a candidatura. Tente novamente." }, { status: 503 }); }
 }

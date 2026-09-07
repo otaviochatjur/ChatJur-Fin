@@ -1,3 +1,5 @@
+import { resolveAsaasWebhook } from "@/lib/integrations-server";
+import { withWebhookTenant } from "@/lib/tenant-server";
 import type { AsaasPayment } from "@/lib/asaas";
 import { syncAsaasPayment } from "@/lib/payment-sync";
 import { supabaseRequest } from "@/lib/supabase-server";
@@ -28,14 +30,12 @@ const PAYMENT_EVENTS = new Set([
  * the Asaas dashboard (Configurações > Integrações > Webhooks).
  */
 export async function POST(request: Request) {
-  const expectedToken = process.env.ASAAS_WEBHOOK_TOKEN;
-  if (expectedToken) {
-    const receivedToken = request.headers.get("asaas-access-token");
-    if (receivedToken !== expectedToken) {
-      return Response.json({ error: "Token inválido." }, { status: 401 });
-    }
-  }
+  const tenant = await resolveAsaasWebhook(request.headers.get("asaas-access-token"));
+  if (!tenant) return Response.json({ error: "Token inválido." }, { status: 401 });
+  return withWebhookTenant(tenant, () => handleWebhook(request));
+}
 
+async function handleWebhook(request: Request) {
   let body: AsaasWebhookBody;
   try {
     body = await request.json();
