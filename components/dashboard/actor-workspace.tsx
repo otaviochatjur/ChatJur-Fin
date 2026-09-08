@@ -52,6 +52,7 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
   const [deselectedKeys, setDeselectedKeys] = useState<Set<string>>(new Set());
   const [creatingLinks, setCreatingLinks] = useState(false);
   const [linkStatus, setLinkStatus] = useState("");
+  const [linkDescription, setLinkDescription] = useState("");
 
   const [customDialog, setCustomDialog] = useState(false);
   const [customName, setCustomName] = useState("");
@@ -362,6 +363,7 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
             planId: candidate.planId,
             customPlanId: candidate.customPlanId,
             planName: candidate.name,
+            description: linkDescription.trim() || undefined,
             billingPeriod: candidate.billingPeriod,
             priceVersion: "V1",
             value: candidate.value,
@@ -377,6 +379,7 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
       if (successCount > 0) {
         toast.success(successCount === selectedCandidates.length ? `${successCount} link(s) gerado(s) no Asaas.` : `${successCount} de ${selectedCandidates.length} link(s) gerado(s).`);
         setDeselectedKeys(new Set());
+        if (successCount === selectedCandidates.length) setLinkDescription("");
         await loadDetail();
         onChanged();
       } else {
@@ -654,6 +657,11 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
                   </label>
                 ))}
               </div>
+              <label className="block text-sm font-medium">
+                Descrição da cobrança no Asaas
+                <Input className="mt-1" value={linkDescription} onChange={(event) => setLinkDescription(event.target.value)} placeholder="Ex.: Assinatura do Plano CRM + IA" />
+              </label>
+              <p className="text-xs text-slate-500 dark:text-muted-foreground">A descrição será aplicada aos links selecionados. Se ficar vazia, o sistema usará a descrição padrão do plano. Cobranças por boleto vencerão em 1 dia útil após serem geradas pelo link.</p>
               {linkStatus && <p role="alert" className="text-sm text-red-600 dark:text-red-300">{linkStatus}</p>}
               <Button className="w-full bg-[#3a5d9d] text-white hover:bg-[#2c4a80]" disabled={creatingLinks || selectedCandidates.length === 0} onClick={generateSelectedLinks}>
                 <Link2 className="size-4" />{creatingLinks ? "Gerando…" : `Gerar ${selectedCandidates.length || ""} link${selectedCandidates.length === 1 ? "" : "s"} no Asaas`}

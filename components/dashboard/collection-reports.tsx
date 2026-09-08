@@ -66,7 +66,7 @@ export function CollectionReports({ onSelect, selectedPayments, onSelectionChang
   const selectionBlock = (row: ReportRow) => {
     if (selected?.mode === 'ALL') return 'O relatório completo é somente para consulta.';
     if (!['PENDING','OVERDUE'].includes(row.snapshot.status)) return 'A cobrança não está em aberto.';
-    if (row.customer_found === false) return 'Cliente não encontrado na base.';
+    if (row.customer_found === false) return 'Cliente do Asaas ainda não sincronizado na base. Sincronize a base para confirmar o status.';
     if (row.customer_status !== 'ACTIVE') return 'Cliente sem status Ativo confirmado.';
     if (!row.snapshot.stage) return 'Esta cobrança não possui etapa da régua para hoje.';
     const phone = row.snapshot.phone?.replace(/\D/g, '') ?? '';

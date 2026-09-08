@@ -46,7 +46,7 @@ export function previewCollection(payment: BillingPayment, contact: BillingConta
   const stage = collectionSchedule(payment.due_date, today, rules, calendar).stage;
   const row: CollectionPreview = { payment, contact, instance_id: senderInstanceId, days: Number.isFinite(days) ? days : null, stage, text: "", parameters: {}, language: "pt_BR", blocked: null };
   if (!["PENDING", "OVERDUE"].includes(payment.status)) row.blocked = "Cobrança não está em aberto";
-  else if (!contact) row.blocked = "Cliente não encontrado na base";
+  else if (!contact) row.blocked = "Cliente do Asaas ainda não sincronizado na base";
   else if (contact.status !== undefined && contact.status !== "ACTIVE") row.blocked = "Cliente sem status Ativo confirmado";
   else if (contact.is_active !== true) row.blocked = "Contato inativo ou não identificado";
   else if (!stage) row.blocked = "Sem envio hoje";

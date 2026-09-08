@@ -180,3 +180,51 @@ test("a new account never inherits the legacy user's Asaas key", async () => {
   try { assert.equal(await withWebhookTenant({ id: "new-tenant", legacy: false }, () => getAsaasConfig()), null); }
   finally { globalThis.fetch = previousFetch; for (const key of ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "ASAAS_API_KEY"]) { if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key]; } }
 });
+
+test("generated Asaas links use the entered description and a one-business-day boleto due date", async () => {
+  const { withWebhookTenant } = await vite.ssrLoadModule("/lib/tenant-server.ts");
+  const { POST } = await vite.ssrLoadModule("/app/api/asaas/payment-links/route.ts");
+  const previousFetch = globalThis.fetch;
+  const previous = { ...process.env };
+  Object.assign(process.env, {
+    SUPABASE_URL: "https://db.invalid",
+    SUPABASE_SERVICE_ROLE_KEY: "service-test",
+    ASAAS_API_KEY: "asaas-test",
+    ASAAS_BASE_URL: "https://asaas.invalid/v3",
+  });
+  let asaasPayload;
+  let storedLink;
+  globalThis.fetch = async (input, options = {}) => {
+    const url = new URL(input);
+    if (url.host === "asaas.invalid") {
+      asaasPayload = JSON.parse(options.body);
+      return Response.json({ id: "link_1", url: "https://asaas.invalid/l/1", description: asaasPayload.description });
+    }
+    if (url.host === "db.invalid") {
+      const table = url.pathname.split("/").at(-1);
+      if (table === "nexo_integrations") return Response.json([]);
+      if (table === "payment_links") {
+        storedLink = JSON.parse(options.body);
+        return Response.json([{ id: "11111111-1111-4111-8111-111111111111", ...storedLink }]);
+      }
+      if (table === "audit_events") return Response.json([]);
+    }
+    throw new Error(`Unexpected request ${url}`);
+  };
+  try {
+    const response = await withWebhookTenant({ id: "tenant-a", owner_user_id: null, reserved_email: null, legacy: true }, () => POST(new Request("http://localhost/api/asaas/payment-links", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ partnerId: "actor-1", partnerName: "Parceiro", planId: "plan-1", planName: "Plano CRM + IA", description: "  Mensalidade CRM e IA  ", billingPeriod: "MONTHLY", value: 199 }),
+    })));
+    assert.equal(response.status, 201, JSON.stringify(await response.clone().json()));
+    assert.equal(asaasPayload.description, "Mensalidade CRM e IA");
+    assert.equal(asaasPayload.dueDateLimitDays, 1);
+    assert.equal(storedLink.asaas_snapshot.description, "Mensalidade CRM e IA");
+  } finally {
+    globalThis.fetch = previousFetch;
+    for (const key of ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "ASAAS_API_KEY", "ASAAS_BASE_URL"]) {
+      if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key];
+    }
+  }
+});
