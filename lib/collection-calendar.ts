@@ -11,14 +11,20 @@ function easter(year: number) {
   const month = Math.floor((h + l - 7 * m + 114) / 31), day = (h + l - 7 * m + 114) % 31 + 1;
   return `${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
 }
-export function isCollectionBusinessDay(date: string) {
+export function isCollectionHoliday(date: string) {
   const value = new Date(`${date}T00:00:00Z`), year = value.getUTCFullYear();
-  if (!Number.isFinite(value.getTime()) || value.getUTCDay() === 0 || value.getUTCDay() === 6) return false;
+  if (!Number.isFinite(value.getTime())) return false;
   const fixed = ["01-01", "04-21", "05-01", "09-07", "10-12", "11-02", "11-15", "12-25", ...(year >= 2024 ? ["11-20"] : [])];
-  return !fixed.includes(date.slice(5)) && date !== addCalendarDays(easter(year), -2);
+  return fixed.includes(date.slice(5)) || date === addCalendarDays(easter(year), -2);
 }
-export function nextCollectionBusinessDay(date: string) {
+export type CollectionCalendar = { saturday: boolean; sunday: boolean; holidays: boolean };
+export function isCollectionBusinessDay(date: string, calendar: CollectionCalendar = { saturday: false, sunday: false, holidays: false }) {
+  const value = new Date(`${date}T00:00:00Z`);
+  if (!Number.isFinite(value.getTime())) return false;
+  return (value.getUTCDay() !== 6 || calendar.saturday) && (value.getUTCDay() !== 0 || calendar.sunday) && (!isCollectionHoliday(date) || calendar.holidays);
+}
+export function nextCollectionBusinessDay(date: string, calendar?: CollectionCalendar) {
   let next = date;
-  for (let i = 0; i < 15; i++) { if (isCollectionBusinessDay(next)) return next; next = addCalendarDays(next, 1); }
+  for (let i = 0; i < 15; i++) { if (isCollectionBusinessDay(next, calendar)) return next; next = addCalendarDays(next, 1); }
   throw new Error("Data inválida para a régua.");
 }

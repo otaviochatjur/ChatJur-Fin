@@ -473,8 +473,8 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
                   </SelectContent>
                 </Select>
               </div>
-              {metrics.clients >= CONNECT_PLUS_ELIGIBILITY_CLIENTS && profileTier === "STANDARD" && (
-                <p className="text-xs font-medium text-primary">Elegível para Plus: {metrics.clients} clientes ativos.</p>
+              {(metrics.activeClients ?? metrics.clients) >= CONNECT_PLUS_ELIGIBILITY_CLIENTS && profileTier === "STANDARD" && (
+                <p className="text-xs font-medium text-primary">Elegível para Plus: {metrics.activeClients ?? metrics.clients} clientes ativos.</p>
               )}
             </div>
           )}

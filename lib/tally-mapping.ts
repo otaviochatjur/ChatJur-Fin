@@ -1,44 +1,10 @@
-import { openSecret, type Integration } from "@/lib/integrations-server";
-import { adminRequest, withWebhookTenant, type Tenant } from "@/lib/tenant-server";
-import { createHmac, timingSafeEqual } from "node:crypto";
-import { supabaseRequest } from "@/lib/supabase-server";
-
-type TallyOption = { id?: string; text?: string; label?: string };
-type TallyField = { key?: string; label?: string; type?: string; value?: unknown; options?: TallyOption[] };
-type TallyWebhookBody = {
-  eventId?: string;
-  eventType?: string;
-  createdAt?: string;
-  data?: {
-    responseId?: string;
-    submissionId?: string;
-    respondentId?: string;
-    formId?: string;
-    formName?: string;
-    fields?: TallyField[];
-  };
-};
-
-/**
- * Tally signs the raw request body with HMAC-SHA256 (base64), keyed with the
- * webhook's signing secret, in the `Tally-Signature` header — see
- * https://tally.so/help/webhooks. Must run against the exact bytes received
- * (not a JSON.parse → JSON.stringify round-trip), so the caller passes the
- * untouched text body.
- */
-function verifyTallySignature(rawBody: string, header: string | null, secret: string): boolean {
-  if (!header) return false;
-  const expected = createHmac("sha256", secret).update(rawBody).digest("base64");
-  const received = Buffer.from(header);
-  const expectedBuf = Buffer.from(expected);
-  if (received.length !== expectedBuf.length) return false;
-  return timingSafeEqual(received, expectedBuf);
-}
+export type TallyOption = { id?: string; text?: string; label?: string };
+export type TallyField = { key?: string; label?: string; type?: string; value?: unknown; options?: TallyOption[] };
 
 function normalizeLabel(label: string) {
   return label
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\p{Diacritic}/gu, "")
     .toLowerCase()
     .trim();
 }
@@ -65,12 +31,15 @@ type Rule = { column: string; kind: "single" | "array" | "consent"; test: (label
  * later. Every submission's full `raw_payload` is preserved regardless of
  * mapping outcome, so nothing is ever lost even if a specific rule below
  * needs adjusting after a real submission comes in.
+ *
+ * Shared by the ongoing API sync (`lib/tally-sync.ts`) and the one-off
+ * historical backfill (`scripts/legacy-import/import-tally-submissions.mjs`)
+ * so both paths classify a given question exactly the same way.
  */
 const RULES: Rule[] = [
   { column: "whatsapp", kind: "single", test: (l) => l.includes("whatsapp") },
   { column: "email", kind: "single", test: (l) => l.includes("e-mail") || l.includes("email") },
   { column: "applicant_type", kind: "single", test: (l) => l.includes("tipo de candidat") },
-  { column: "full_name", kind: "single", test: (l) => l.includes("nome completo") || l === "nome" || l === "seu nome" },
 
   { column: "birth_date", kind: "single", test: (l) => l.includes("nascimento") },
   { column: "profession", kind: "single", test: (l) => l.includes("profiss") },
@@ -97,6 +66,14 @@ const RULES: Rule[] = [
   { column: "institution_member_count", kind: "single", test: (l) => l.includes("membro") },
   { column: "institution_scope", kind: "single", test: (l) => l.includes("abrangenc") },
   { column: "institution_actions", kind: "single", test: (l) => l.includes("acoes") && (l.includes("realizad") || l.includes("institu")) },
+
+  // Generic "nome completo" catch-all — must come after every more-specific
+  // name rule above (payee, representante, instituição): those questions'
+  // labels also often contain the substring "nome completo" (e.g. "Nome
+  // completo ou Razão Social do recebedor"), so checking this first would
+  // let a later, unrelated question (e.g. the payee's name) silently
+  // overwrite the applicant's own name.
+  { column: "full_name", kind: "single", test: (l) => l.includes("nome completo") || l === "nome" || l === "seu nome" },
 
   { column: "cpf", kind: "single", test: (l) => l === "cpf" || (l.includes("cpf") && !l.includes("cnpj")) },
 
@@ -152,7 +129,7 @@ const RULES: Rule[] = [
   { column: "consent_flags", kind: "consent", test: (l) => l.includes("concordo") || l.includes("autorizo") || l.includes("ciente") || l.includes("declaro") },
 ];
 
-function mapTallyFieldsToLead(fields: TallyField[]): Record<string, unknown> {
+export function mapTallyFieldsToLead(fields: TallyField[]): Record<string, unknown> {
   const record: Record<string, unknown> = {};
   const consentFlags: Record<string, boolean> = {};
 
@@ -175,92 +152,4 @@ function mapTallyFieldsToLead(fields: TallyField[]): Record<string, unknown> {
 
   if (Object.keys(consentFlags).length > 0) record.consent_flags = consentFlags;
   return record;
-}
-
-/**
- * Receives Tally Connect-form submissions (single form shared by
- * Parceiro/Embaixador/Institucional candidates — classification into one of
- * those roles happens manually from the "Candidaturas" review screen, not
- * on the form itself). See mapTallyFieldsToLead for the field-mapping
- * strategy and its limitations.
- *
- * Configure this route's public URL + a signing secret in Tally (form →
- * Integrations → Webhooks) and save the same value in Integrations → Tally. The environment secret
- * remains a fallback for the original shared form.
- */
-async function handleWebhook(request: Request, secret: string, formId?: string | null) {
-  const rawBody = await request.text();
-
-  if (secret) {
-    const signature = request.headers.get("tally-signature");
-    if (!verifyTallySignature(rawBody, signature, secret)) {
-      return Response.json({ error: "Assinatura inválida." }, { status: 401 });
-    }
-  }
-
-  let body: TallyWebhookBody;
-  try {
-    body = JSON.parse(rawBody);
-  } catch {
-    return Response.json({ error: "Corpo inválido." }, { status: 400 });
-  }
-
-  if (body.eventType !== "FORM_RESPONSE" || !body.data) return Response.json({ received: true });
-
-  if (formId && body.data.formId !== formId) return Response.json({ error: "Formulário não autorizado." }, { status: 403 });
-  const submissionId = body.data.submissionId ?? body.data.responseId;
-  if (!submissionId) return Response.json({ error: "Resposta sem identificador." }, { status: 400 });
-
-  try {
-    // Idempotency: Tally retries on any non-2xx response, and can also
-    // redeliver the same submission id more than once.
-    if (submissionId) {
-      const existing = await supabaseRequest<{ id: string }[]>(
-        `/rest/v1/connect_leads?select=id&tally_submission_id=eq.${encodeURIComponent(submissionId)}`,
-      );
-      if (existing[0]) return Response.json({ received: true, deduplicated: true });
-    }
-
-    const mapped = mapTallyFieldsToLead(body.data.fields ?? []);
-    await supabaseRequest("/rest/v1/connect_leads", {
-      method: "POST",
-      body: {
-        tally_submission_id: submissionId,
-        tally_response_id: body.data.responseId ?? null,
-        tally_form_id: body.data.formId ?? null,
-        submitted_at: body.createdAt ?? new Date().toISOString(),
-        raw_payload: body,
-        ...mapped,
-      },
-    });
-
-    return Response.json({ received: true });
-  } catch (error) {
-    // Unlike the Asaas webhook (which has a manual "Sincronizar pagamentos"
-    // fallback), a lost lead here has no recovery path — so, unlike that
-    // handler, we deliberately return a 5xx to make Tally retry the
-    // delivery instead of silently swallowing the error.
-    console.error("Erro ao processar webhook do Tally:", error);
-    return Response.json({ error: error instanceof Error ? error.message : "Erro ao processar candidatura." }, { status: 500 });
-  }
-}
-
-export async function POST(request: Request) {
-  try {
-    const account = new URL(request.url).searchParams.get("account");
-    if (account) {
-      if (!/^[a-f0-9-]{36}$/i.test(account)) return Response.json({ error: "Conta inválida." }, { status: 400 });
-      const [integration] = await adminRequest<Integration[]>(`/rest/v1/nexo_integrations?provider=eq.tally&tenant_id=eq.${account}&select=*`);
-      if (!integration) return Response.json({ error: "Webhook não configurado." }, { status: 503 });
-      const [tenant] = await adminRequest<Tenant[]>(`/rest/v1/nexo_tenants?id=eq.${account}&select=*`);
-      if (!tenant) return Response.json({ error: "Base não configurada." }, { status: 503 });
-      const secret = openSecret(integration.encrypted_key, tenant.id, "tally");
-      return withWebhookTenant(tenant, () => handleWebhook(request, secret, integration.account_id));
-    }
-    const secret = process.env.TALLY_WEBHOOK_SECRET;
-    if (!secret) return Response.json({ error: "Webhook não configurado." }, { status: 503 });
-    const [tenant] = await adminRequest<Tenant[]>("/rest/v1/nexo_tenants?legacy=eq.true&select=*");
-    if (!tenant) return Response.json({ error: "Base não configurada." }, { status: 503 });
-    return withWebhookTenant(tenant, () => handleWebhook(request, secret));
-  } catch { return Response.json({ error: "Não foi possível receber a candidatura. Tente novamente." }, { status: 503 }); }
 }

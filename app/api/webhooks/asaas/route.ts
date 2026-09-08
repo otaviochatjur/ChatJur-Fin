@@ -1,3 +1,4 @@
+import { updateAsaasBasePayment } from "@/lib/asaas-base";
 import { resolveAsaasWebhook } from "@/lib/integrations-server";
 import { withWebhookTenant } from "@/lib/tenant-server";
 import type { AsaasPayment } from "@/lib/asaas";
@@ -67,6 +68,7 @@ async function handleWebhook(request: Request) {
       eventRow = created;
     }
 
+    if (body.event.startsWith("PAYMENT_") && body.payment) await updateAsaasBasePayment(body.payment);
     if (PAYMENT_EVENTS.has(body.event) && body.payment) {
       await syncAsaasPayment(body.payment);
     }
@@ -77,9 +79,8 @@ async function handleWebhook(request: Request) {
 
     return Response.json({ received: true });
   } catch (error) {
-    // Still return 200: we've logged the raw event, so a manual sync can
-    // recover later. Returning an error here would make Asaas hammer retries.
+    // Leave the event unprocessed and request a retry; a failed update must not be acknowledged.
     console.error("Erro ao processar webhook do Asaas:", error);
-    return Response.json({ received: true, warning: error instanceof Error ? error.message : "Erro ao processar evento." });
+    return Response.json({ error: "Não foi possível processar o evento. Tente novamente." }, { status: 503 });
   }
 }

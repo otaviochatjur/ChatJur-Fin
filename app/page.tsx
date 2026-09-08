@@ -1,6 +1,8 @@
 "use client";
 
+import { BackgroundUpdates } from "@/components/dashboard/background-updates";
 import Image from "next/image";
+import { AsaasBaseSync } from "@/components/dashboard/asaas-base-sync";
 import { SectionBoundary, SectionLoading } from "@/components/dashboard/section-boundary";
 import { AuthGate } from "@/components/auth-gate";
 import { lazy, Suspense, useState } from "react";
@@ -52,7 +54,9 @@ export default function Home() { return <AuthGate><Dashboard /></AuthGate>; }
 
 function Dashboard() {
   const [sectionId, setSectionId] = useState<(typeof sections)[number]["id"]>("dashboard");
-  const { actors, metrics, plans, customers, subscriptions, payments, implementationPayments, events, links, connectLeads, error, reload } = useDashboardData();
+  const { actors, metrics, plans, customers, subscriptions, payments, implementationPayments, events, links, connectLeads, error, reload, reloadConnectLeads } = useDashboardData();
+  const pendingLeads = connectLeads.filter(lead => lead.status === "PENDING").length;
+  const pendingBadge = <span aria-label={`${pendingLeads} candidaturas pendentes`} className="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-blue-500/20 px-1.5 text-xs font-semibold text-blue-300">{pendingLeads}</span>;
   const active = sections.find((item) => item.id === sectionId) ?? sections[0];
   // Implantação (taxa única) não entra na tabela de preços por ator nem na
   // geração de links de assinatura — só o catálogo "Planos e Links" precisa
@@ -72,7 +76,7 @@ function Dashboard() {
           <p className="px-3 pb-2 text-xs font-medium uppercase tracking-[0.16em] text-slate-500 dark:text-muted-foreground">Gestão</p>
           {sections.map(({ id, label, Icon }) => (
             <button key={id} aria-current={sectionId === id ? "page" : undefined} onPointerEnter={() => warmSection(id)} onFocus={() => warmSection(id)} onClick={() => setSectionId(id)} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition ${sectionId === id ? "bg-blue-500/20 text-white shadow-[inset_3px_0_0_#60a5fa]" : "text-slate-300 hover:bg-white/5 hover:text-white"}`}>
-              <Icon className="size-4" />{label}
+              <Icon className="size-4 shrink-0" />{label}{id === "connect" && pendingBadge}
             </button>
           ))}
         </nav>
@@ -85,7 +89,7 @@ function Dashboard() {
             <ThemeToggle />
           </div>
         </header>
-        <nav aria-label="Navegação" className="flex gap-2 overflow-x-auto border-b bg-white dark:bg-card p-3 lg:hidden">{sections.map(({ id, label }) => <button key={id} aria-current={sectionId === id ? "page" : undefined} onPointerEnter={() => warmSection(id)} onFocus={() => warmSection(id)} onClick={() => setSectionId(id)} className={`shrink-0 rounded-lg px-3 py-2 text-sm ${sectionId === id ? "bg-primary text-primary-foreground" : "text-slate-600 dark:text-muted-foreground"}`}>{label}</button>)}</nav>
+        <nav aria-label="Navegação" className="flex gap-2 overflow-x-auto border-b bg-white dark:bg-card p-3 lg:hidden">{sections.map(({ id, label }) => <button key={id} aria-current={sectionId === id ? "page" : undefined} onPointerEnter={() => warmSection(id)} onFocus={() => warmSection(id)} onClick={() => setSectionId(id)} className={`shrink-0 rounded-lg px-3 py-2 text-sm ${sectionId === id ? "bg-primary text-primary-foreground" : "text-slate-600 dark:text-muted-foreground"}`}>{label}{id === "connect" && pendingBadge}</button>)}</nav>
         <div className="dashboard-content mx-auto max-w-[1500px] space-y-6 p-4 sm:p-6 md:p-8">
           {error && (
             <div className="flex items-start gap-3 rounded-2xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950 p-4 text-sm text-amber-800 dark:text-amber-300">
@@ -96,6 +100,8 @@ function Dashboard() {
               </div>
             </div>
           )}
+          <AsaasBaseSync onChanged={reload} />
+          <BackgroundUpdates onLeadsChanged={reloadConnectLeads} />
           <SectionBoundary key={sectionId}><Suspense fallback={<SectionLoading />}>
           {sectionId === "form" && <section className="rounded-2xl border bg-white dark:bg-card p-6"><h2 className="text-lg font-semibold">Formulário de inscrição</h2><p className="mt-2 text-sm text-slate-500 dark:text-muted-foreground">Compartilhe o formulário com candidatos a parceiros, embaixadores e instituições.</p><div className="mt-4 flex flex-wrap gap-4"><a className="font-medium text-blue-700 dark:text-blue-300 underline" href="/connect/inscricao" target="_blank" rel="noopener noreferrer">Abrir página do formulário</a><a className="font-medium text-blue-700 dark:text-blue-300 underline" href="https://tally.so/r/2EWBOV" target="_blank" rel="noopener noreferrer">Link público para compartilhar</a></div></section>}
           {sectionId === "dashboard" && <OverviewSection actors={actors} customers={customers} subscriptions={subscriptions} payments={payments} implementationPayments={implementationPayments} events={events} />}

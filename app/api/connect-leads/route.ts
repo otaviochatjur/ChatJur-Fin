@@ -1,15 +1,20 @@
+import { requireUser, sameOrigin } from "@/lib/auth-server";
 import { supabaseRequest } from "@/lib/supabase-server";
 import { connectDefaultRatePercent } from "@/lib/metrics";
 
 const statuses = ["PENDING", "APPROVED", "REJECTED"] as const;
 const classifications = ["PARTNER", "AMBASSADOR", "INSTITUTIONAL"] as const;
 
-/** Candidaturas recebidas via formulário Tally (ver app/api/webhooks/tally). */
+/** Candidaturas recebidas via formulário Tally (ver lib/tally-sync.ts e app/api/tally/sync-submissions). */
 export async function GET(request: Request) {
   try {
     const statusParam = new URL(request.url).searchParams.get("status");
     const filter = statusParam && statuses.includes(statusParam as typeof statuses[number]) ? `&status=eq.${encodeURIComponent(statusParam)}` : "";
-    const leads = await supabaseRequest<unknown[]>(`/rest/v1/connect_leads?select=*&order=created_at.desc${filter}`);
+    const leads: unknown[] = [];
+    for (let offset = 0; ; offset += 500) {
+      const page = await supabaseRequest<unknown[]>(`/rest/v1/connect_leads?select=*&order=created_at.desc,id&limit=500&offset=${offset}${filter}`);
+      leads.push(...page); if (page.length < 500) break;
+    }
     return Response.json({ leads });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Erro ao consultar candidaturas." }, { status: 500 });
@@ -18,6 +23,7 @@ export async function GET(request: Request) {
 
 type LeadRecord = {
   id: string;
+  status: string;
   full_name: string | null;
   email: string | null;
   whatsapp: string | null;
@@ -41,6 +47,8 @@ type LeadRecord = {
  * (if any) came from.
  */
 export async function PATCH(request: Request) {
+  if (!sameOrigin(request)) return Response.json({ error: "Origem inválida." }, { status: 403 });
+  try { await requireUser(); } catch { return Response.json({ error: "Entre novamente." }, { status: 401 }); }
   try {
     const payload = await request.json() as {
       id?: string;
@@ -52,6 +60,9 @@ export async function PATCH(request: Request) {
 
     const [lead] = await supabaseRequest<LeadRecord[]>(`/rest/v1/connect_leads?select=*&id=eq.${encodeURIComponent(payload.id)}`);
     if (!lead) return Response.json({ error: "Candidatura não encontrada." }, { status: 404 });
+
+    if (lead.status !== "PENDING") return Response.json({ error: "Esta candidatura já foi revisada. Atualize a lista." }, { status: 409 });
+    if (!["APPROVE", "REJECT"].includes(payload.action)) return Response.json({ error: "Ação inválida." }, { status: 400 });
 
     if (payload.action === "REJECT") {
       const [updated] = await supabaseRequest<Record<string, unknown>[]>(`/rest/v1/connect_leads?id=eq.${encodeURIComponent(payload.id)}`, {

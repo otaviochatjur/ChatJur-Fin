@@ -1,12 +1,12 @@
 export const FINANCIAL_INSTANCE = "46a8a400-70a2-43fd-bfeb-1e286871711b";
-import { addCalendarDays, isCollectionBusinessDay, nextCollectionBusinessDay } from "./collection-calendar";
+import { addCalendarDays, isCollectionBusinessDay, nextCollectionBusinessDay, type CollectionCalendar } from "./collection-calendar";
 import { DEFAULT_COLLECTION_SETTINGS, type CollectionRule } from "./collection-rules";
 export const COLLECTION_STAGES: Record<number, string> = { [-5]: "cobranca_d_menos_5", 0: "cobranca_d_000", 1: "cobranca_d_mais_01", 2: "cobranca_d_mais_002", 5: "cobranca_d_mais_5", 10: "cobranca_d_mais_10", 20: "cobranca_d_mais_20", 25: "cobranca_d_mais_025", 30: "cobranca_d_mais_30_cancelamento" };
-export function collectionSchedule(due: string | null, today: string, rules: CollectionRule[] = DEFAULT_COLLECTION_SETTINGS.rules) {
+export function collectionSchedule(due: string | null, today: string, rules: CollectionRule[] = DEFAULT_COLLECTION_SETTINGS.rules, calendar?: CollectionCalendar) {
   if (!due || !Number.isFinite(dayDistance(today, due))) return { stage: null, trigger: null, nominal: null, effective: null };
-  if (isCollectionBusinessDay(today)) for (const rule of [...rules].sort((a,b) => a.days-b.days)) {
+  if (isCollectionBusinessDay(today, calendar)) for (const rule of [...rules].sort((a,b) => a.days-b.days)) {
     const k = rule.days;
-    const nominal = addCalendarDays(due, k), effective = nextCollectionBusinessDay(nominal);
+    const nominal = addCalendarDays(due, k), effective = nextCollectionBusinessDay(nominal, calendar);
     if (effective === today) return { stage: rule.template, trigger: k, nominal, effective };
   }
   return { stage: null, trigger: null, nominal: null, effective: null };
@@ -26,11 +26,11 @@ export function canonicalBillingPayment(p: BillingPayment & { asaas_id?: string 
 }
 export type BillingTemplate = { name: string; language: string; status: string; instance_id: string; components: { type: string; text?: string; format?: string; buttons?: unknown[] }[] };
 export type CollectionPreview = { payment: BillingPayment; contact: BillingContact | null; days: number | null; stage: string | null; text: string; parameters: Record<string, string>; language: string; blocked: string | null; approval?: string };
-export function previewCollection(payment: BillingPayment, contact: BillingContact | null, templates: BillingTemplate[], today: string, rules: CollectionRule[] = DEFAULT_COLLECTION_SETTINGS.rules): CollectionPreview {
+export function previewCollection(payment: BillingPayment, contact: BillingContact | null, templates: BillingTemplate[], today: string, rules: CollectionRule[] = DEFAULT_COLLECTION_SETTINGS.rules, calendar?: CollectionCalendar): CollectionPreview {
   payment = canonicalBillingPayment(payment);
   contact = contact ? { id: contact.id, name: contact.name ?? null, phone: contact.phone ?? null, is_active: contact.is_active === true, instance_id: contact.instance_id ?? null } : null;
   const days = payment.due_date ? dayDistance(today, payment.due_date) : NaN;
-  const stage = collectionSchedule(payment.due_date, today, rules).stage;
+  const stage = collectionSchedule(payment.due_date, today, rules, calendar).stage;
   const row: CollectionPreview = { payment, contact, days: Number.isFinite(days) ? days : null, stage, text: "", parameters: {}, language: "pt_BR", blocked: null };
   if (!["PENDING", "OVERDUE"].includes(payment.status)) row.blocked = "Cobrança não está em aberto";
   else if (!contact || contact.is_active !== true) row.blocked = "Contato inativo ou não identificado";

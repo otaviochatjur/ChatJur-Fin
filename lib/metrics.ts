@@ -98,6 +98,8 @@ export type PriceVersion = {
 };
 
 export type PaymentLink = {
+  asaas_snapshot?: { active?: boolean; deleted?: boolean; value?: number; name?: string } | null;
+  asaas_synced_at?: string | null;
   id: string;
   /** Null for links pulled straight from Asaas that nobody has assigned to a partner/ambassador/sales rep yet. */
   actor_id: string | null;
@@ -254,7 +256,7 @@ export function sumImplementationRevenue(payments: ImplementationPayment[]) {
   return payments.filter((payment) => isPaidStatus(payment.status)).reduce((sum, payment) => sum + Number(payment.value), 0);
 }
 
-export type ActorMetrics = { clients: number; mrr: number; links: number };
+export type ActorMetrics = { clients: number; activeClients?: number; mrr: number; links: number };
 
 export type AuditEvent = {
   id: string;
@@ -411,10 +413,20 @@ export const money = new Intl.NumberFormat("pt-BR", { style: "currency", currenc
  * Real (not link-face-value) metrics: MRR only counts subscriptions that
  * actually have a paid Asaas payment behind them (see `lib/payment-sync.ts`
  * — a `subscriptions` row is only created/kept ACTIVE once a payment with a
- * "paid" status comes in), and "clients" counts distinct paying customers.
+ * "paid" status comes in), and "clients" counts all distinct linked customers. Active customers stay
+ * separate for Plus eligibility; unconfirmed subscriptions never add MRR.
+ *
+ * A subscription's own `actor_id` is only a snapshot taken when the row was
+ * created (`lib/payment-sync.ts` never patches it afterwards). The link's
+ * `actor_id` is the live, authoritative attribution — the same one
+ * `display_actor_id` (see `lib/subscription-presentation.ts`) already
+ * trusts — so a subscription whose link was attributed to a partner *after*
+ * the subscription existed (e.g. a legacy-import backfill) still counts
+ * here, matching what already happens for the "Links" count above.
  */
 export function computeActorMetrics(actors: CommercialActor[], subscriptions: Subscription[], links: PaymentLink[]): Record<string, ActorMetrics> {
-  const metrics: Record<string, ActorMetrics> = Object.fromEntries(actors.map((actor) => [actor.id, { clients: 0, mrr: 0, links: 0 }]));
+  const metrics: Record<string, ActorMetrics> = Object.fromEntries(actors.map((actor) => [actor.id, { clients: 0, activeClients: 0, mrr: 0, links: 0 }]));
+  const linksById = new Map(links.map((link) => [link.id, link]));
 
   for (const link of links) {
     if (link.status !== "ACTIVE" || !link.actor_id) continue;
@@ -422,18 +434,26 @@ export function computeActorMetrics(actors: CommercialActor[], subscriptions: Su
     if (entry) entry.links += 1;
   }
 
+  const activeCustomersByActor = new Map<string, Set<string>>();
   const customersByActor = new Map<string, Set<string>>();
   for (const subscription of subscriptions) {
-    if (subscription.status !== "ACTIVE" || !subscription.actor_id) continue;
-    const entry = metrics[subscription.actor_id];
+    const link = subscription.payment_link_id ? linksById.get(subscription.payment_link_id) : undefined;
+    const actorId = link ? link.actor_id : subscription.actor_id;
+    if (!actorId) continue;
+    const entry = metrics[actorId];
     if (!entry) continue;
-    entry.mrr += monthlyValue(subscription.value, subscription.billing_period);
-    const set = customersByActor.get(subscription.actor_id) ?? new Set<string>();
+    if (subscription.status === "ACTIVE") {
+      entry.mrr += monthlyValue(subscription.value, subscription.billing_period);
+      const active = activeCustomersByActor.get(actorId) ?? new Set<string>();
+      active.add(subscription.customer_id); activeCustomersByActor.set(actorId, active);
+    }
+    const set = customersByActor.get(actorId) ?? new Set<string>();
     set.add(subscription.customer_id);
-    customersByActor.set(subscription.actor_id, set);
+    customersByActor.set(actorId, set);
   }
   for (const [actorId, set] of customersByActor) {
     metrics[actorId].clients = set.size;
+    metrics[actorId].activeClients = activeCustomersByActor.get(actorId)?.size ?? 0;
   }
 
   return metrics;

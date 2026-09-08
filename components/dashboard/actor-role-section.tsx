@@ -140,7 +140,7 @@ export function ActorRoleSection({
               return (
                 <TableRow key={actor.id} className={actor.id === selectedId ? "bg-[#eef4fd]" : ""}>
                   <TableCell><button onClick={() => setSelectedId(actor.id)} className="text-left"><p className="font-medium">{actor.name}</p><p className="text-xs text-slate-500 dark:text-muted-foreground">{actorCategoryLabel(actor)}</p></button></TableCell>
-                  {columns.isVisible("clients") && <TableCell className="text-right">{actorMetrics.clients}</TableCell>}
+                  {columns.isVisible("clients") && <TableCell className="text-right"><span title="Clientes vinculados, independentemente do status da assinatura">{actorMetrics.clients}</span></TableCell>}
                   {columns.isVisible("mrr") && <TableCell className="text-right font-medium">{money.format(actorMetrics.mrr)}</TableCell>}
                   {columns.isVisible("links") && <TableCell className="text-right">{actorMetrics.links}</TableCell>}
                   {columns.isVisible("status") && <TableCell><StatusBadge status={actor.status} /></TableCell>}

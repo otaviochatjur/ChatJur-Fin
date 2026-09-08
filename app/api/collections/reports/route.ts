@@ -10,8 +10,8 @@ export async function GET(request: Request) {
     const id = params.get("id");
     if (id) {
       if (!validId(id)) return Response.json({ error: "Relatório inválido." }, { status: 400 });
-      const [review] = await supabaseRequest<{ after_json: unknown }[]>(`/rest/v1/audit_events?entity_type=eq.collection_review&entity_id=eq.${id}&order=created_at.desc&limit=1&select=after_json`);
-      return Response.json({ report: await readCollectionReport(id), rows: await reportRows(id), review: review?.after_json ?? null }, { headers: { "Cache-Control": "no-store" } });
+      const [report, rows, reviews] = await Promise.all([readCollectionReport(id), reportRows(id), supabaseRequest<{ after_json: unknown }[]>(`/rest/v1/audit_events?entity_type=eq.collection_review&entity_id=eq.${id}&order=created_at.desc&limit=1&select=after_json`)]);
+      return Response.json({ report, rows, review: reviews[0]?.after_json ?? null }, { headers: { "Cache-Control": "no-store" } });
     }
     const offset = Math.max(0, Number(params.get("offset")) || 0);
     const reports = await supabaseRequest<CollectionReport[]>(`/rest/v1/collection_reports?select=*&order=created_at.desc&limit=100&offset=${Math.floor(offset)}`);

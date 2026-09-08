@@ -2,41 +2,47 @@ import assert from "node:assert/strict";
 import test, { after } from "node:test";
 import { createServer } from "vite";
 import { fileURLToPath } from "node:url";
-import { createHmac } from "node:crypto";
 const root = fileURLToPath(new URL("..", import.meta.url));
 const vite = await createServer({ appType: "custom", cacheDir: "node_modules/.vite-tests/integrations", configFile: false, root, resolve: { alias: { "@": root } }, server: { middlewareMode: true, hmr: false } });
 after(() => vite.close());
 
-test("Tally authenticates the configured form and isolates tenant submissions", async () => {
-  const { sealSecret } = await vite.ssrLoadModule('/lib/integrations-server.ts');
-  const { POST } = await vite.ssrLoadModule('/app/api/webhooks/tally/route.ts');
-  const previousFetch=globalThis.fetch, previous={...process.env};
-  process.env.SUPABASE_URL='https://example.invalid';process.env.SUPABASE_SERVICE_ROLE_KEY='test';process.env.INTEGRATIONS_ENCRYPTION_KEY='a1'.repeat(32);
-  const tenant='11111111-1111-4111-8111-111111111111', secret='tally-test-secret';
-  const encrypted=sealSecret(secret,tenant,'tally');const rows=[];
-  globalThis.fetch=async(input,options)=>{
-    const url=new URL(input),table=url.pathname.split('/').at(-1);
-    if(table==='nexo_integrations')return Response.json(url.searchParams.get('tenant_id')===`eq.${tenant}`?[{tenant_id:tenant,encrypted_key:encrypted,account_id:'2EWBOV'}]:[]);
-    if(table==='nexo_tenants')return Response.json([{id:tenant,legacy:false}]);
-    assert.equal(table,'connect_leads');assert.equal(url.searchParams.get('tenant_id'),`eq.${tenant}`);
-    if(options.method==='POST'){const row=JSON.parse(options.body);assert.equal(row.tenant_id,tenant);rows.push(row);return Response.json([]);}
-    return Response.json(rows);
-  };
-  const request=(form,signature=true,account=tenant)=>{
-    const body=JSON.stringify({eventType:'FORM_RESPONSE',data:{formId:form,submissionId:'response-1',fields:[{label:'Nome completo',value:'Teste'}]}});
-    return new Request(`http://localhost/api/webhooks/tally?account=${account}`,{method:'POST',body,headers:{'tally-signature':signature?createHmac('sha256',secret).update(body).digest('base64'):'wrong'}});
-  };
+test("Tally sync pulls submissions via the API key, dedupes, and never touches a webhook", async () => {
+  const { withWebhookTenant } = await vite.ssrLoadModule('/lib/tenant-server.ts');
+  const { syncTallySubmissions, validateTallyKey } = await vite.ssrLoadModule('/lib/tally-sync.ts');
+  const previousFetch = globalThis.fetch, previous = { ...process.env };
+  process.env.SUPABASE_URL = 'https://example.invalid'; process.env.SUPABASE_SERVICE_ROLE_KEY = 'test';
+  const tenant = { id: '11111111-1111-4111-8111-111111111111', legacy: false };
+  const questions = [{ id: 'q1', title: 'Nome completo' }];
+  const submission = { id: 'sub-1', formId: '2EWBOV', submittedAt: '2026-09-05T00:00:00.000Z', responses: [{ questionId: 'q1', answer: 'Teste' }] };
+  const rows = [];
   try {
-    assert.equal((await POST(request('2EWBOV',false))).status,401);
-    assert.equal((await POST(request('other'))).status,403);
-    assert.equal((await POST(request('2EWBOV',true,'22222222-2222-4222-8222-222222222222'))).status,503);
-    assert.equal(rows.length,0);
-    assert.equal((await POST(request('2EWBOV'))).status,200);
-    assert.equal((await (await POST(request('2EWBOV'))).json()).deduplicated,true);
-    assert.equal(rows.length,1);
+    // A key that fails at Tally never touches Supabase and surfaces clearly.
+    globalThis.fetch = async (url) => { assert.equal(new URL(url).host, 'api.tally.so'); return new Response('unauthorized', { status: 401 }); };
+    await assert.rejects(() => validateTallyKey('bad-key', '2EWBOV'), /inv.lida/);
+
+    globalThis.fetch = async (input, options) => {
+      const url = new URL(input);
+      if (url.host === 'api.tally.so') {
+        assert.equal(url.pathname, '/forms/2EWBOV/submissions');
+        assert.equal(options.headers.Authorization, 'Bearer real-key');
+        return Response.json({ hasMore: false, questions, submissions: [submission] });
+      }
+      const table = url.pathname.split('/').at(-1);
+      assert.equal(table, 'connect_leads'); assert.equal(url.searchParams.get('tenant_id'), `eq.${tenant.id}`);
+      if (options?.method === 'POST') { const row = JSON.parse(options.body); assert.equal(row.tenant_id, tenant.id); rows.push(row); return Response.json([row]); }
+      return Response.json(rows);
+    };
+    const first = await withWebhookTenant(tenant, () => syncTallySubmissions('real-key', '2EWBOV'));
+    assert.deepEqual(first, { scanned: 1, imported: 1, skipped: 0 });
+    assert.equal(rows[0].tally_submission_id, 'sub-1');
+    assert.equal(rows[0].full_name, 'Teste');
+
+    const second = await withWebhookTenant(tenant, () => syncTallySubmissions('real-key', '2EWBOV'));
+    assert.deepEqual(second, { scanned: 1, imported: 0, skipped: 1 });
+    assert.equal(rows.length, 1);
   } finally {
-    globalThis.fetch=previousFetch;
-    for(const key of ['SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY','INTEGRATIONS_ENCRYPTION_KEY']){if(previous[key]===undefined)delete process.env[key];else process.env[key]=previous[key];}
+    globalThis.fetch = previousFetch;
+    for (const key of ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']) { if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key]; }
   }
 });
 

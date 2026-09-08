@@ -6,6 +6,21 @@ type SupabaseRequestOptions = {
   prefer?: string;
 };
 
+/** Only the fixed synchronization function is exposed; tenant identity comes from the session. */
+export async function finishAsaasBaseSync<T>(generation: string, offset: number): Promise<T> {
+  const tenant = await currentTenant();
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!key || !process.env.SUPABASE_URL) throw new Error("Supabase não configurado.");
+  const token = isWebhookRequest() ? key : (await requireUser()).accessToken;
+  const response = await fetch(`${process.env.SUPABASE_URL}/rest/v1/rpc/finish_asaas_base_sync`, {
+    method: "POST", headers: { apikey: key, Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ p_tenant: tenant.id, p_generation: generation, p_offset: offset }),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.message ?? "Não foi possível concluir a sincronização.");
+  return data as T;
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

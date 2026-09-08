@@ -8,7 +8,7 @@ export async function GET() {
     const [actors, links, baseSubscriptions, payments, implementationPayments] = await Promise.all([
       supabaseRequest<CommercialActor[]>("/rest/v1/commercial_actors?select=*&order=role.asc,name.asc"),
       supabaseRequest<PaymentLink[]>("/rest/v1/payment_links?select=id,actor_id,value,billing_period,status"),
-      supabaseRequest<Subscription[]>("/rest/v1/subscriptions?select=id,customer_id,actor_id,value,billing_period,status"),
+      supabaseRequest<Subscription[]>("/rest/v1/subscriptions?select=id,customer_id,actor_id,payment_link_id,value,billing_period,status"),
       supabaseRequest<Payment[]>("/rest/v1/payments?select=status,value,payment_date&order=payment_date.desc.nullslast&limit=5000"),
       supabaseRequest<ImplementationPayment[]>("/rest/v1/implementation_payments?select=status,value,payment_date&order=payment_date.desc.nullslast&limit=5000"),
     ]);

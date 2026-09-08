@@ -1,6 +1,7 @@
+import { dispatchCollection } from "@/lib/collection-dispatch";
 import { rulesForCustomer } from "@/lib/collection-rules";
 import { readCollectionSettings } from "@/lib/collection-settings-server";
-import { createHash, createHmac, timingSafeEqual, randomUUID } from "node:crypto";
+import { createHmac, timingSafeEqual, randomUUID } from "node:crypto";
 import { requireUser, sameOrigin } from "@/lib/auth-server";
 import { currentTenant } from "@/lib/tenant-server";
 import { supabaseRequest } from "@/lib/supabase-server";
@@ -67,7 +68,6 @@ export async function POST(request: Request) {
   try { await requireUser(); } catch { return Response.json({ error: "Entre novamente." }, { status: 401 }); }
   const body = await request.json().catch(() => null);
   if (body?.approved !== true || typeof body.paymentId !== "string" || !/^[a-f0-9-]{36}$/i.test(body.paymentId) || typeof body.approval !== "string" || !/^[a-f0-9]{64}$/.test(body.approval)) return Response.json({ error: "Aprove uma prévia válida antes de enviar." }, { status: 400 });
-  let attemptId: string | null = null;
   try {
     const tenant = await currentTenant(); const today = collectionToday();
     const settings = await readCollectionSettings();
@@ -80,20 +80,10 @@ export async function POST(request: Request) {
     payment.status = source.status; payment.value = Number(source.value); payment.due_date = source.dueDate ?? null; payment.invoice_url = source.invoiceUrl ?? null;
     const row = previewCollection(payment, await contact(payment.contact_id), await templates(), today, rulesForCustomer(settings, source.customer));
     if (row.blocked || !timingSafeEqual(Buffer.from(body.approval), Buffer.from(approval(row, tenant.id, today)))) return Response.json({ error: "Os dados mudaram ou a prévia expirou. Atualize a régua e revise novamente." }, { status: 409 });
-    const hash = createHash("sha256").update(`${tenant.id}:${payment.id}:${today}:${row.stage}`).digest("hex").slice(0, 32);
-    const id = `${hash.slice(0,8)}-${hash.slice(8,12)}-${hash.slice(12,16)}-${hash.slice(16,20)}-${hash.slice(20)}`;
-    const existing = await supabaseRequest<{ id: string }[]>(`/rest/v1/audit_events?id=eq.${id}&select=id`);
-    if (existing.length) return Response.json({ error: "Esta etapa já foi enviada ou tem uma tentativa registrada. Confira o histórico antes de repetir." }, { status: 409 });
-    // The unique ID claims this payment/day atomically, including concurrent approvals.
-    await supabaseRequest("/rest/v1/audit_events", { method: "POST", body: { id, entity_type: "collection_send", entity_id: payment.id, action: "SENDING", after_json: { ...row, date: today } } });
-    attemptId = id;
-    const { data: conversation } = await chatRequest<{ data: { id: string; instance_id: string; contact_id: string } }>("/v1/conversations", { method: "POST", idempotencyKey: `conversation-${id}`, body: { contact_id: payment.contact_id, instance_id: FINANCIAL_INSTANCE } });
-    if (conversation.instance_id !== FINANCIAL_INSTANCE || conversation.contact_id !== payment.contact_id) throw new Error("A conversa retornada não corresponde ao contato e número financeiro aprovados.");
-    await chatRequest(`/v1/conversations/${encodeURIComponent(conversation.id)}/messages`, { method: "POST", idempotencyKey: `collection-${id}`, body: { type: "template", instance_id: FINANCIAL_INSTANCE, template: { name: row.stage, language: row.language, parameters: row.parameters } } });
-    await supabaseRequest(`/rest/v1/audit_events?id=eq.${id}`, { method: "PATCH", body: { action: "SENT" } });
+    const result = await dispatchCollection(row, today);
+    if (result.skipped) return Response.json({ error: "Esta etapa já possui uma tentativa registrada. Confira o histórico." }, { status: 409 });
     return Response.json({ ok: true });
   } catch (error) {
-    if (attemptId) await supabaseRequest(`/rest/v1/audit_events?id=eq.${attemptId}`, { method: "PATCH", body: { action: "REVIEW_REQUIRED" } }).catch(() => null);
-    return Response.json({ error: attemptId ? "Não foi possível confirmar a conclusão. Confira o histórico e a conversa no Chat Jurídico antes de reenviar." : error instanceof Error ? error.message : "Não foi possível enviar." }, { status: 400 });
+    return Response.json({ error: error instanceof Error ? error.message : "Não foi possível enviar." }, { status: 400 });
   }
 }

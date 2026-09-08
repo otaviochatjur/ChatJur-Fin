@@ -1,3 +1,7 @@
+import { readAsaasBaseState } from "./asaas-base";
+import { advanceBaseReport } from "./asaas-base-report";
+import { currentTenant } from "./tenant-server";
+import { ReportCustomerCache, parallelReportItems as parallel } from "./report-customer-cache";
 import { readCollectionSettings } from "./collection-settings-server";
 import { rulesForCustomer } from "./collection-rules";
 import { getAsaasConfig, type AsaasCustomer, type AsaasPayment } from "./asaas";
@@ -16,16 +20,14 @@ async function sourceReader() {
     return r.json() as Promise<T>;
   };
 }
-async function parallel<T,R>(items: T[], action: (item: T) => Promise<R>) {
-  const result: R[] = [];
-  for (let i = 0; i < items.length; i += 5) result.push(...await Promise.all(items.slice(i,i+5).map(action)));
-  return result;
-}
+const customerCache = new ReportCustomerCache<AsaasCustomer>();
 export async function createCollectionReport(mode: ReportMode) {
-  await sourceReader();
+  const base = mode === "ALL" ? await readAsaasBaseState() : null;
+  if (mode === "ALL" && !base?.active_generation) throw new Error("Sincronize a base do Asaas antes de gerar Todas as cobranças.");
+  if (mode !== "ALL") await sourceReader();
   const ruleConfig = await readCollectionSettings();
   const today = collectionToday(); const empty = mode === "DAILY" && !isCollectionBusinessDay(today);
-  const [report] = await supabaseRequest<CollectionReport[]>("/rest/v1/collection_reports", { method: "POST", prefer: "return=representation", body: { mode, rule_config: ruleConfig, report_date: today, status: empty ? "COMPLETE" : "RUNNING", completed_at: empty ? new Date().toISOString() : null } });
+  const [report] = await supabaseRequest<CollectionReport[]>("/rest/v1/collection_reports", { method: "POST", prefer: "return=representation", body: { mode, source_generation: base?.active_generation ?? null, source_updated_at: base?.last_event_at && base.last_event_at > (base.completed_at ?? "") ? base.last_event_at : base?.completed_at ?? null, rule_config: ruleConfig, report_date: today, status: empty ? "COMPLETE" : "RUNNING", completed_at: empty ? new Date().toISOString() : null } });
   return report;
 }
 export async function readCollectionReport(id: string) {
@@ -35,24 +37,33 @@ export async function readCollectionReport(id: string) {
 }
 export async function reportRows(id: string) {
   const rows: ReportRow[] = [];
-  for (let offset = 0; ; offset += 500) {
-    const page = await supabaseRequest<ReportRow[]>(`/rest/v1/collection_report_rows?report_id=eq.${encodeURIComponent(id)}&select=*&order=id.asc&limit=500&offset=${offset}`);
-    rows.push(...page); if (page.length < 500) return rows;
+  for (let offset = 0; ; offset += 1000) {
+    const page = await supabaseRequest<ReportRow[]>(`/rest/v1/collection_report_rows?report_id=eq.${encodeURIComponent(id)}&select=*&order=id.asc&limit=1000&offset=${offset}`);
+    rows.push(...page); if (page.length < 1000) return rows;
+  }
+}
+async function countReportRows(id: string) {
+  let count = 0;
+  for (let offset = 0; ; offset += 1000) {
+    const page = await supabaseRequest<{ id: string }[]>(`/rest/v1/collection_report_rows?report_id=eq.${encodeURIComponent(id)}&select=id&order=id.asc&limit=1000&offset=${offset}`);
+    count += page.length; if (page.length < 1000) return count;
   }
 }
 export async function advanceCollectionReport(id: string) {
   const report = await readCollectionReport(id);
   if (report.status === "COMPLETE") return report;
+  if (report.source_generation) return advanceBaseReport(report);
+  const scope = `${(await currentTenant()).id}:${report.id}`;
   try {
     const read = await sourceReader();
     const statuses = report.mode === "ALL" ? [null] : ["PENDING", "OVERDUE"];
     const status = statuses[report.phase];
-    const page = await read<{ data: SourcePayment[]; hasMore: boolean }>(`/payments?limit=25&offset=${report.page_offset}${status ? `&status=${status}` : ""}`);
+    const page = await read<{ data: SourcePayment[]; hasMore: boolean }>(`/payments?limit=${report.mode === "ALL" ? 100 : 25}&offset=${report.page_offset}${status ? `&status=${status}` : ""}`);
     if (!Array.isArray(page.data) || typeof page.hasMore !== "boolean" || (page.hasMore && !page.data.length)) throw new Error("Asaas retornou uma página incompleta. Retome a consulta.");
     const selected = report.mode === "DAILY" ? page.data.filter(p => collectionSchedule(p.dueDate ?? null, report.report_date, rulesForCustomer(report.rule_config, p.customer)).stage) : page.data;
     const customerIds = [...new Set(selected.map(p => p.customer))];
     const customers = new Map(await parallel(customerIds, async customerId => {
-      try { return [customerId, await read<AsaasCustomer>(`/customers/${encodeURIComponent(customerId)}`)] as const; }
+      try { return [customerId, await customerCache.get(scope, customerId, () => read<AsaasCustomer>(`/customers/${encodeURIComponent(customerId)}`))] as const; }
       catch { return [customerId, null] as const; }
     }));
     const snapshots = await parallel(selected, async (payment): Promise<ReportSnapshot> => {
@@ -74,7 +85,8 @@ export async function advanceCollectionReport(id: string) {
     const phase = page.hasMore ? report.phase : report.phase + 1;
     const complete = phase >= statuses.length;
     // Absolute progress + compare-and-set makes a repeated page safe to resume.
-    const [updated] = await supabaseRequest<CollectionReport[]>(`/rest/v1/collection_reports?id=eq.${report.id}&status=eq.RUNNING&phase=eq.${report.phase}&page_offset=eq.${report.page_offset}`, { method: "PATCH", prefer: "return=representation", body: { phase, page_offset: page.hasMore ? report.page_offset + page.data.length : 0, processed: report.processed + page.data.length, row_count: complete ? (await reportRows(report.id)).length : report.row_count + snapshots.length, status: complete ? "COMPLETE" : "RUNNING", completed_at: complete ? new Date().toISOString() : null, error: null } });
+    const [updated] = await supabaseRequest<CollectionReport[]>(`/rest/v1/collection_reports?id=eq.${report.id}&status=eq.RUNNING&phase=eq.${report.phase}&page_offset=eq.${report.page_offset}`, { method: "PATCH", prefer: "return=representation", body: { phase, page_offset: page.hasMore ? report.page_offset + page.data.length : 0, processed: report.processed + page.data.length, row_count: complete ? await countReportRows(report.id) : report.row_count + snapshots.length, status: complete ? "COMPLETE" : "RUNNING", completed_at: complete ? new Date().toISOString() : null, error: null } });
+    if (updated?.status === "COMPLETE") customerCache.clear(scope);
     return updated ?? readCollectionReport(id);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Não foi possível completar esta etapa.";

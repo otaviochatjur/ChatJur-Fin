@@ -6,8 +6,9 @@ import { useEffect } from "react";
  * Embeds the public "Chat Jurídico Connect" application form (Tally) — the
  * single form shared by Parceiro/Embaixador/Institucional candidates.
  * Category classification happens later, manually, from the "Candidaturas"
- * tab once the submission lands in `connect_leads` via
- * app/api/webhooks/tally.
+ * tab once the submission lands in `connect_leads` — pulled from Tally's
+ * API by lib/tally-sync.ts (app/api/tally/sync-submissions), not pushed by
+ * a webhook.
  */
 export function ConnectForm() {
   useEffect(() => {

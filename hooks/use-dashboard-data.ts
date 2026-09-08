@@ -23,6 +23,12 @@ export function useDashboardData() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const reloadConnectLeads = useCallback(async () => {
+    const response = await fetch('/api/connect-leads', { signal: AbortSignal.timeout(20000), cache: 'no-store' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error ?? 'Falha ao atualizar candidaturas.');
+    setConnectLeads(data.leads ?? []);
+  }, []);
   const reload = useCallback(async () => {
     // No setState before this first await: keeps this effect-safe per
     // react-hooks/set-state-in-effect (loading/error updates only happen
@@ -72,5 +78,5 @@ export function useDashboardData() {
     reload();
   }, [reload]);
 
-  return { events, actors, metrics, totals, plans, customers, subscriptions, payments, implementationPayments, auditEvents, links, connectLeads, loading, error, reload };
+  return { events, actors, metrics, totals, plans, customers, subscriptions, payments, implementationPayments, auditEvents, links, connectLeads, loading, error, reload, reloadConnectLeads };
 }

@@ -1,6 +1,8 @@
 export type ReportMode = "DAILY" | "OPEN" | "ALL";
 export const reportModeLabels = { DAILY: "Régua do dia", OPEN: "Vencidas e a vencer", ALL: "Todas as cobranças" };
 export type CollectionReport = {
+  source_cursor?: string | null;
+  source_generation?: string | null; source_updated_at?: string | null;
   rule_config: import("./collection-rules").CollectionSettings;
   id: string; mode: ReportMode; report_date: string; status: "RUNNING" | "COMPLETE";
   phase: number; page_offset: number; processed: number; row_count: number;

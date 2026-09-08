@@ -300,7 +300,7 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
   const [kindFilter, setKindFilter] = useState<(typeof planKindFilters)[number]>("ALL");
   const [actorFilter, setActorFilter] = useState("all");
   const [search, setSearch] = useState("");
-  const [syncing, setSyncing] = useState(false);
+
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [confirmingBulk, setConfirmingBulk] = useState(false);
@@ -385,17 +385,9 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
     [selected, links, drafts],
   );
 
-  async function syncFromAsaas() {
-    setSyncing(true);
-    try {
-      const response = await fetch("/api/asaas/sync-links", { method: "POST" });
-      const data = await response.json();
-      if (!response.ok) { toast.error(data.error ?? "Não foi possível sincronizar."); return; }
-      toast.success(`${data.imported} link(s) novo(s) importado(s) de ${data.totalSeen} na conta Asaas.${data.skippedNoValue ? ` ${data.skippedNoValue} sem valor fixo foram ignorados.` : ""}`);
-      onChanged();
-    } finally {
-      setSyncing(false);
-    }
+  function syncFromAsaas() {
+    window.dispatchEvent(new Event("nexo:sync-asaas-base"));
+    toast.info("Acompanhe a sincronização de clientes, cobranças e links no indicador acima.");
   }
 
   /** Raw PATCH call, no toast/refresh side effects — shared by the single-row and bulk confirm flows so bulk can aggregate one summary toast instead of one per link. */
@@ -525,7 +517,7 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
               {confirmingBulk ? "Vinculando…" : `Vincular selecionados (${dirtySelectedCount})`}
             </Button>
           )}
-          <Button variant="outline" size="sm" disabled={syncing} onClick={syncFromAsaas}>{syncing ? "Sincronizando…" : "Sincronizar links do Asaas"}</Button>
+          <Button variant="outline" size="sm" onClick={syncFromAsaas}>Sincronizar links do Asaas</Button>
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 dark:border-border p-4">
@@ -687,7 +679,7 @@ const LinkRow = memo(function LinkRow({
       )}
       {showValue && <TableCell className="text-right text-sm">{money.format(link.value)}<span className="ml-1 text-xs text-slate-400">{link.billing_period === "ANNUAL" ? "/ano" : link.billing_period === "ONE_TIME" ? " · taxa única" : "/mês"}</span></TableCell>}
       {showSource && <TableCell className="text-xs text-slate-500 dark:text-muted-foreground">{link.source === "ASAAS_SYNC" ? "Importado do Asaas" : "Gerado aqui"}</TableCell>}
-      {showStatus && <TableCell><StatusBadge status={link.status} /></TableCell>}
+      {showStatus && <TableCell><StatusBadge status={link.status} />{link.asaas_snapshot && <p className="mt-1 text-xs text-muted-foreground" title={link.asaas_synced_at ? `Consultado em ${new Date(link.asaas_synced_at).toLocaleString("pt-BR")}` : undefined}>Asaas: {link.asaas_snapshot.deleted ? "Removido" : link.asaas_snapshot.active === false ? "Inativo" : "Ativo"}</p>}</TableCell>}
       <TableCell className="flex justify-end gap-1.5">
         {dirty && (
           <Button size="sm" disabled={confirming} onClick={() => onConfirm(link.id)} className="bg-[#3a5d9d] text-white hover:bg-[#2c4a80]">
