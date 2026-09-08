@@ -64,6 +64,36 @@ test("Chat Jurídico uses edge-compatible redirects and never follows credential
   } finally { globalThis.fetch = original; }
 });
 
+test("Chat Jurídico exposes only connected senders and creates the recipient in the chosen instance", async () => {
+  const { withWebhookTenant } = await vite.ssrLoadModule("/lib/tenant-server.ts");
+  const { sealSecret } = await vite.ssrLoadModule("/lib/integrations-server.ts");
+  const { connectedChatInstances, contactForChatInstance } = await vite.ssrLoadModule("/lib/chat-juridico-server.ts");
+  const previousFetch = globalThis.fetch, previous = { ...process.env };
+  Object.assign(process.env, { SUPABASE_URL: "https://db.invalid", SUPABASE_SERVICE_ROLE_KEY: "test", INTEGRATIONS_ENCRYPTION_KEY: "a".repeat(64) });
+  const encrypted = sealSecret("chat-key", "tenant-a", "chat-juridico");
+  const target = "22222222-2222-4222-8222-222222222222";
+  let created;
+  globalThis.fetch = async (input, options = {}) => {
+    const url = new URL(input);
+    if (url.host === "db.invalid") return Response.json([{ encrypted_key: encrypted, tenant_id: "tenant-a", provider: "chat-juridico" }]);
+    assert.equal(options.headers["X-API-Key"], "chat-key");
+    if (url.pathname === "/v1/instances") return Response.json({ data: [{ id: target, name: "Cobranças", is_connected: true }, { id: "offline", is_connected: false }] });
+    if (url.pathname === "/v1/contacts" && (!options.method || options.method === "GET")) return Response.json({ data: [], pagination: { has_more: false } });
+    if (url.pathname === "/v1/contacts" && options.method === "POST") { created = JSON.parse(options.body); return Response.json({ data: { id: "new-contact", name: created.name, phone: created.phone, instance_id: created.instance_id, is_active: true } }, { status: 201 }); }
+    throw new Error(`Unexpected request ${url}`);
+  };
+  try {
+    await withWebhookTenant({ id: "tenant-a", legacy: false }, async () => {
+      assert.deepEqual((await connectedChatInstances()).map(instance => instance.id), [target]);
+      const contact = await contactForChatInstance({ id: "source", name: "Ana", phone: "+55 11 99999-8888", is_active: true, instance_id: "source-instance" }, target);
+      assert.equal(contact.id, "new-contact"); assert.equal(created.phone, "5511999998888"); assert.equal(created.instance_id, target);
+    });
+  } finally {
+    globalThis.fetch = previousFetch;
+    for (const key of ["SUPABASE_URL","SUPABASE_SERVICE_ROLE_KEY","INTEGRATIONS_ENCRYPTION_KEY"]) { if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key]; }
+  }
+});
+
 test("paid sync records payments without reactivating a manually disabled subscription", async () => {
   const { withWebhookTenant } = await vite.ssrLoadModule("/lib/tenant-server.ts");
   const { syncAsaasPayment } = await vite.ssrLoadModule("/lib/payment-sync.ts");

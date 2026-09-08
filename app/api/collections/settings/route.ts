@@ -3,13 +3,16 @@ import { readCollectionSettings } from "@/lib/collection-settings-server";
 import { collectionSettingsSchema } from "@/lib/collection-rules";
 import { supabaseRequest } from "@/lib/supabase-server";
 import { chatRequest } from "@/lib/chat-juridico-server";
-import { FINANCIAL_INSTANCE, type BillingTemplate } from "@/lib/collection-policy";
+import { type BillingTemplate } from "@/lib/collection-policy";
+import { connectedChatInstances } from "@/lib/chat-juridico-server";
 export async function GET(request: Request) {
   try { await requireUser(); } catch { return Response.json({ error: "Entre novamente." }, { status: 401 }); }
   try {
     if (new URL(request.url).searchParams.has("templates")) {
-      const result = await chatRequest<{ data: BillingTemplate[] }>(`/v1/templates?instance_id=${FINANCIAL_INSTANCE}&status=APPROVED`);
-      return Response.json({ templates: result.data }, { headers: { "Cache-Control": "no-store" } });
+      const instances = await connectedChatInstances();
+      const results = await Promise.all(instances.map(instance => chatRequest<{ data: BillingTemplate[] }>(`/v1/templates?instance_id=${encodeURIComponent(instance.id)}&status=APPROVED`)));
+      const templates = [...new Map(results.flatMap(result => result.data).map(template => [template.name, template])).values()];
+      return Response.json({ templates }, { headers: { "Cache-Control": "no-store" } });
     }
     return Response.json({ config: await readCollectionSettings() }, { headers: { "Cache-Control": "no-store" } });
   } catch (e) { return Response.json({ error: e instanceof Error ? e.message : "Falha ao ler a configuração." }, { status: 400 }); }

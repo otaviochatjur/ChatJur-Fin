@@ -1,6 +1,5 @@
 import { randomBytes } from "node:crypto";
 import { chatRequest } from "@/lib/chat-juridico-server";
-import { FINANCIAL_INSTANCE } from "@/lib/collection-policy";
 import { requireUser, sameOrigin } from "@/lib/auth-server";
 import { adminRequest, currentTenant } from "@/lib/tenant-server";
 import { getIntegration, openSecret, sealSecret, secretHash, validateAsaasKey } from "@/lib/integrations-server";
@@ -33,8 +32,10 @@ export async function POST(request: Request) {
       accountId = body.formId;
     }
     if (body.provider === "chat-juridico") {
-      await chatRequest(`/v1/instances/${FINANCIAL_INSTANCE}`, { apiKey });
-      await chatRequest(`/v1/templates?instance_id=${FINANCIAL_INSTANCE}&status=APPROVED`, { apiKey });
+      const result = await chatRequest<{ data: { id: string; is_connected: boolean }[] }>("/v1/instances", { apiKey });
+      const connected = result.data.filter(instance => instance.is_connected);
+      if (!connected.length) throw new Error("A chave não possui nenhum número conectado no Chat Jurídico.");
+      await chatRequest(`/v1/templates?instance_id=${encodeURIComponent(connected[0].id)}&status=APPROVED`, { apiKey });
       await chatRequest("/v1/payments?limit=1", { apiKey });
     }
     if (body.provider === "asaas") {

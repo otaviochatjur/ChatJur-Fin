@@ -121,3 +121,20 @@ test("subscription presentation uses the linked catalog and actor without changi
   assert.equal(custom.display_plan_name, "Plano personalizado");
   assert.equal(presentSubscription({ ...base, payment_link_id: null, plans: null }).display_plan_name, "—");
 });
+
+test("collection review exposes sender selection, complete message and Chat Jurídico dispatch actions", async () => {
+  const source = await readFile(path.join(root, "components/dashboard/collections-section.tsx"), "utf8");
+  const reports = await readFile(path.join(root, "components/dashboard/collection-reports.tsx"), "utf8");
+  const route = await readFile(path.join(root, "app/api/collections/route.ts"), "utf8");
+  assert.match(source, /Enviar pelo número/);
+  assert.match(source, /Mensagem completa/);
+  assert.match(source, /Disparar esta mensagem/);
+  assert.match(source, /Disparar selecionadas pelo Chat Jurídico/);
+  assert.match(source, /\/api\/collections\/instances/);
+  assert.match(source, /action: "prepare"/);
+  assert.match(source, /paymentIds: \[\.\.\.selected\]/);
+  assert.match(source, /Lote pausado: \$\{result\.message\}/);
+  assert.match(reports, /Cliente sem status Ativo confirmado/);
+  assert.doesNotMatch(route, /Pagamento do Asaas sem vínculo no Chat Jurídico/);
+  assert.doesNotMatch(route, /\/v1\/payments\?status=/);
+});

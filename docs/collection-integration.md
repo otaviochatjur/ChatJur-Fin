@@ -3,15 +3,17 @@
 Implementação baseada na skill `agente-financeiro-cobranca.skill` fornecida pelo responsável e no contrato OpenAPI de https://web.chatjuridico.com.br/openapi-pt.yaml (consultado em 07/09/2026).
 
 - API REST: https://api.jur.chat/v1; autenticação `X-API-Key`, exclusivamente no servidor. MCP equivalente: https://api.jur.chat/mcp.
-- Relatórios vêm diretamente do Asaas, seguindo o fluxo de `C:\Projetos Claude\Cobrança Asaas`: diário, em aberto e todas as cobranças. Dados e progresso ficam em `collection_reports` e `collection_report_rows`, com retomada por página. As prévias usam o vínculo exato do pagamento Asaas no Chat Jurídico; vínculos ausentes ou ambíguos ficam bloqueados.
+- Relatórios vêm diretamente do Asaas, seguindo o fluxo de `C:\Projetos Claude\Cobrança Asaas`: diário, em aberto e todas as cobranças. Dados e progresso ficam em `collection_reports` e `collection_report_rows`, com retomada por página. A preparação recebe somente os pagamentos marcados e confirma cobrança, cliente e telefone diretamente no Asaas.
 - Etapas padrão: -5, 0, 1, 2, 5, 10, 20, 25 e 30 dias; calendário America/Sao_Paulo. Finais de semana e feriados nacionais transferem a ação ao próximo dia útil; convergências usam a menor etapa. D30 não cancela planos automaticamente.
 - Regras, categorias, templates e exceções por cliente são editáveis em Cobranças → Configurar régua, salvas por usuário em `collection_settings`. Prioridade: exceção individual, categoria, padrão. Cada relatório guarda a configuração usada em sua geração.
+- A aptidão usa o status já mantido em `customers` pelo próprio sistema. Somente clientes `ACTIVE` podem ser marcados; a régua não consulta planilhas externas para decidir o status.
 - O Kanban agrupa os clientes do relatório pelo maior atraso no mês de vencimento escolhido. Use Todas as cobranças para incluir pagamentos recebidos; a posição não é uma etapa manual de negociação.
-- Contatos consultados por ID, em grupos de até cinco; lista paginada de cobranças, sem paginação do cadastro inteiro.
-- Instância financeira especificada pela skill: 46a8a400-70a2-43fd-bfeb-1e286871711b. A chave deve ter acesso a esse canal. Não é utilizado outro canal como alternativa.
-- A documentação atual esclarece que um contato pertence a uma instância. Contatos vinculados a outro número ficam para revisão, em vez de seguir a suposição da skill de que `criarConversa` pode movê-los entre números.
-- Apenas templates aprovados pt_BR do canal financeiro e variáveis textuais conhecidas são liberados. Mídia, botões, parâmetros desconhecidos e templates ausentes ficam para revisão, sem mensagens inventadas.
+- A prévia não depende de uma cobrança espelhada no Chat Jurídico. No disparo, o contato é localizado pelo telefone dentro do número remetente escolhido e criado nessa instância quando ainda não existe.
+- A tela consulta `GET /v1/instances` e permite escolher qualquer número conectado acessível pela chave. A lista informa quantos templates aprovados cada número possui e prioriza um número com templates ao abrir a tela.
+- Como contatos são únicos por `(phone, instance_id)`, a prévia usa o contato financeiro apenas como fonte segura do nome e telefone. Se o mesmo telefone ainda não existir no número escolhido, o contato é criado nessa instância somente após o clique de disparo; preparar a prévia não cria contatos, conversas ou mensagens.
+- Apenas templates aprovados pt_BR do número escolhido e variáveis textuais conhecidas são liberados. Mídia, botões, parâmetros desconhecidos e templates ausentes ficam para revisão, sem mensagens inventadas.
 - Aprovação individual de texto renderizado, vinculada por HMAC aos dados e ao dia. Pagamento, contato e template são consultados novamente antes do envio.
+- A prévia mostra o texto completo e oferece disparo individual ou em lote somente das cobranças marcadas. O número remetente faz parte da aprovação assinada; trocar o número exige preparar novas prévias.
 - Tentativa reivindicada atomicamente por usuário, pagamento, dia e etapa em `audit_events`; idempotência também enviada à API remota. Resultado incerto não é reenviado automaticamente.
 - Histórico mensal de tentativas exportável em Excel; registros persistem no banco, sem depender de uma pasta local do Claude. Inativos e demais pendências aparecem na consulta; somente tentativas aprovadas geram registros de envio.
 
@@ -66,11 +68,11 @@ Validação real em 07/09/2026: 1.143 clientes, 3.975 cobranças e 252 links no 
 
 ## Programação local por usuário
 
-Em **Cobranças → Programação**, cada usuário escolhe o horário de Brasília, ativa/desativa os envios e permite separadamente sábados, domingos e feriados nacionais. O calendário se aplica aos envios programados; a preparação manual mantém o calendário padrão da régua. Etapas que caem em dias não permitidos passam ao próximo permitido, mantendo a prioridade da menor etapa quando convergem.
+Em **Cobranças → Programação**, cada usuário escolhe o horário de Brasília, o número conectado do Chat Jurídico, ativa/desativa os envios e permite separadamente sábados, domingos e feriados nacionais. O calendário se aplica aos envios programados; a preparação manual mantém o calendário padrão da régua. Etapas que caem em dias não permitidos passam ao próximo permitido, mantendo a prioridade da menor etapa quando convergem.
 
 O coordenador fica montado no painel inteiro e consulta a programação a cada minuto. A execução inicia no horário ou ao abrir o painel depois dele, somente no mesmo dia. É necessário manter o painel aberto, a sessão ativa e o computador conectado; não existe execução em nuvem configurada para esta instalação local. Uma execução já concluída não é reiniciada por alterações de horário no mesmo dia. A fila já iniciada mantém seus candidatos; desativar interrompe os próximos envios, mas não desfaz uma mensagem já em andamento.
 
-A fila diária usa a base sincronizada do Asaas e o vínculo exato do pagamento no Chat Jurídico. Antes de enviar cada item, relê pagamento/cliente no Asaas, contato/template no Chat Jurídico, régua e autorização persistida. Os templates individuais e por categoria prevalecem sobre a régua geral. Contatos ambíguos ou sem vínculo exato não recebem mensagens. A programação não cancela planos ou cobranças.
+A fila diária usa os IDs da base sincronizada do Asaas. Antes de enviar cada item, relê pagamento e cliente no Asaas, confirma o template no número escolhido, localiza ou cria o contato nesse número e revalida a régua e a autorização persistida. Os templates individuais e por categoria prevalecem sobre a régua geral. A programação não cancela planos ou cobranças.
 
 `collection_schedule` armazena configuração; `collection_schedule_jobs` registra fila, progresso, contadores e erros, com RLS por usuário. Um lease no banco coordena abas simultâneas. O transporte compartilhado com o envio manual usa a mesma identificação única de pagamento/dia/etapa e chaves de idempotência. Tentativas incertas interrompem o lote como `REVIEW_REQUIRED`, exigindo análise do histórico e continuação manual; não há retry automático de mensagens.
 

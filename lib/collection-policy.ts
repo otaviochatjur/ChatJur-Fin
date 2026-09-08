@@ -19,27 +19,41 @@ export function dayDistance(today: string, due: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(due) || !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== due) return NaN;
   return Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${due}T00:00:00Z`)) / 86400000);
 }
-export type BillingContact = { id: string; name: string | null; phone: string | null; is_active: boolean; instance_id: string | null };
+export type BillingContact = { id: string; name: string | null; phone: string | null; is_active: boolean; instance_id: string | null; status?: "ACTIVE" | "CANCELLED" | "FROZEN" | null };
 export type BillingPayment = { id: string; asaas_payment_id?: string | null; contact_id: string | null; contact_name: string | null; chat_id: string | null; due_date: string | null; value: number; status: string; invoice_url: string | null };
 export function canonicalBillingPayment(p: BillingPayment & { asaas_id?: string | null }): BillingPayment {
   return { id: p.id, asaas_payment_id: p.asaas_payment_id ?? p.asaas_id ?? null, contact_id: p.contact_id ?? null, contact_name: p.contact_name ?? null, chat_id: p.chat_id ?? null, due_date: p.due_date ?? null, value: Number(p.value), status: p.status, invoice_url: p.invoice_url ?? null };
 }
 export type BillingTemplate = { name: string; language: string; status: string; instance_id: string; components: { type: string; text?: string; format?: string; buttons?: unknown[] }[] };
-export type CollectionPreview = { payment: BillingPayment; contact: BillingContact | null; days: number | null; stage: string | null; text: string; parameters: Record<string, string>; language: string; blocked: string | null; approval?: string };
-export function previewCollection(payment: BillingPayment, contact: BillingContact | null, templates: BillingTemplate[], today: string, rules: CollectionRule[] = DEFAULT_COLLECTION_SETTINGS.rules, calendar?: CollectionCalendar): CollectionPreview {
+export function collectionTemplateCanPreview(template: BillingTemplate) {
+  if (template.status !== "APPROVED" || template.language !== "pt_BR" || !Array.isArray(template.components)) return false;
+  let hasText = false;
+  for (const component of template.components) {
+    const kind = component.type.toLowerCase();
+    if (!["body", "header", "footer"].includes(kind) || (component.format && component.format !== "TEXT")) return false;
+    const value = component.text ?? "";
+    if (value) hasText = true;
+    const variables = [...value.matchAll(/\{\{\s*(\d+)\s*\}\}/g)].map(match => match[1]);
+    if (variables.some(index => kind !== "body" || !["1", "2", "3"].includes(index))) return false;
+  }
+  return hasText;
+}
+export type CollectionPreview = { payment: BillingPayment; contact: BillingContact | null; instance_id: string; days: number | null; stage: string | null; text: string; parameters: Record<string, string>; language: string; blocked: string | null; approval?: string };
+export function previewCollection(payment: BillingPayment, contact: BillingContact | null, templates: BillingTemplate[], today: string, rules: CollectionRule[] = DEFAULT_COLLECTION_SETTINGS.rules, calendar?: CollectionCalendar, senderInstanceId = FINANCIAL_INSTANCE): CollectionPreview {
   payment = canonicalBillingPayment(payment);
-  contact = contact ? { id: contact.id, name: contact.name ?? null, phone: contact.phone ?? null, is_active: contact.is_active === true, instance_id: contact.instance_id ?? null } : null;
+  contact = contact ? { id: contact.id, name: contact.name ?? null, phone: contact.phone ?? null, is_active: contact.is_active === true, instance_id: contact.instance_id ?? null, ...(contact.status !== undefined ? { status: contact.status } : {}) } : null;
   const days = payment.due_date ? dayDistance(today, payment.due_date) : NaN;
   const stage = collectionSchedule(payment.due_date, today, rules, calendar).stage;
-  const row: CollectionPreview = { payment, contact, days: Number.isFinite(days) ? days : null, stage, text: "", parameters: {}, language: "pt_BR", blocked: null };
+  const row: CollectionPreview = { payment, contact, instance_id: senderInstanceId, days: Number.isFinite(days) ? days : null, stage, text: "", parameters: {}, language: "pt_BR", blocked: null };
   if (!["PENDING", "OVERDUE"].includes(payment.status)) row.blocked = "Cobrança não está em aberto";
-  else if (!contact || contact.is_active !== true) row.blocked = "Contato inativo ou não identificado";
+  else if (!contact) row.blocked = "Cliente não encontrado na base";
+  else if (contact.status !== undefined && contact.status !== "ACTIVE") row.blocked = "Cliente sem status Ativo confirmado";
+  else if (contact.is_active !== true) row.blocked = "Contato inativo ou não identificado";
   else if (!stage) row.blocked = "Sem envio hoje";
-  else if (contact.instance_id !== FINANCIAL_INSTANCE) row.blocked = "Contato não vinculado ao número financeiro";
   else if (!contact.phone) row.blocked = "Telefone não informado";
-  const template = templates.find(t => t.name === stage && t.status === "APPROVED" && t.instance_id === FINANCIAL_INSTANCE && t.language === "pt_BR");
+  const template = templates.find(t => t.name === stage && t.status === "APPROVED" && t.instance_id === senderInstanceId && t.language === "pt_BR");
   if (row.blocked) return row;
-  if (!template) return { ...row, blocked: "Template aprovado não encontrado no número financeiro" };
+  if (!template) return { ...row, blocked: "Template aprovado não encontrado no número escolhido" };
   const values: Record<string, string> = { "1": contact?.name ?? payment.contact_name ?? "", "2": payment.due_date?.split("-").reverse().join("/") ?? "", "3": payment.invoice_url ?? "" };
   const texts: string[] = [];
   for (const component of template.components) {

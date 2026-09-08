@@ -10,6 +10,12 @@ const { collectionSchedule, FINANCIAL_INSTANCE } = await vite.ssrLoadModule('/li
 const { connectLeadAnswers } = await vite.ssrLoadModule('/lib/connect-lead-details.ts');
 const { withWebhookTenant } = await vite.ssrLoadModule('/lib/tenant-server.ts');
 const { dispatchCollection } = await vite.ssrLoadModule('/lib/collection-dispatch.ts');
+const { normalizeCollectionPhone } = await vite.ssrLoadModule('/lib/collection-preview-server.ts');
+test('normalizes current Asaas phones for Chat Jurídico recipients', () => {
+  assert.equal(normalizeCollectionPhone('(11) 99999-9999'), '5511999999999');
+  assert.equal(normalizeCollectionPhone('+55 11 99999-9999'), '5511999999999');
+  assert.equal(normalizeCollectionPhone('123'), null);
+});
 test('schedule is disabled by default and enforces Brasilia time', () => {
   assert.equal(scheduleDue(DEFAULT_SCHEDULE, new Date('2026-09-08T15:00:00Z')), false);
   const config = { ...DEFAULT_SCHEDULE, enabled: true };
@@ -46,7 +52,7 @@ test('manual and scheduled attempts share a unique claim; recorded attempts neve
   let reads = 0;
   globalThis.fetch = async input => { const url = new URL(input); assert.equal(url.host, 'db.invalid'); assert.equal(url.pathname, '/rest/v1/audit_events'); reads++; return Response.json([{ id: 'previous-attempt' }]); };
   try {
-    const result = await withWebhookTenant({ id: 'tenant', legacy: true }, () => dispatchCollection({ blocked: null, stage: 'due', payment: { id: 'payment' }, contact: { instance_id: FINANCIAL_INSTANCE } }, '2026-09-08'));
+    const result = await withWebhookTenant({ id: 'tenant', legacy: true }, () => dispatchCollection({ blocked: null, stage: 'due', instance_id: FINANCIAL_INSTANCE, payment: { id: 'payment' }, contact: { instance_id: FINANCIAL_INSTANCE } }, '2026-09-08'));
     assert.equal(result.skipped, true); assert.equal(reads, 1);
   } finally { globalThis.fetch = original; for (const key of ['SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY']) { if (env[key] === undefined) delete process.env[key]; else process.env[key] = env[key]; } }
 });
@@ -73,14 +79,16 @@ test('scheduled worker rechecks Asaas and skips a payment settled after the queu
     const url = new URL(input), table = url.pathname.split('/').at(-1), body = options.body ? JSON.parse(options.body) : null;
     if (url.host === 'api.asaas.com') return Response.json(url.pathname.includes('/payments/') ? { id: 'pay', customer: 'cus', status: 'RECEIVED', value: 100, dueDate: today, invoiceUrl: 'https://example.com/i' } : { name: 'Ana' });
     if (url.host === 'api.jur.chat') {
+      if (url.pathname === '/v1/instances') return Response.json({ data: [{ id: FINANCIAL_INSTANCE, is_connected: true }] });
       assert.ok(!options.method || options.method === 'GET', 'No external message or conversation may be created for a paid charge');
       if (url.pathname.includes('/payments/')) return Response.json({ data: { id: 'chatpay', asaas_payment_id: 'pay', contact_id: 'contact', status: 'OVERDUE' } });
       if (url.pathname.includes('/contacts/')) return Response.json({ data: { id: 'contact', is_active: true, phone: '5511999999999', instance_id: FINANCIAL_INSTANCE } });
       return Response.json({ data: [] });
     }
     if (table === 'nexo_integrations') return Response.json(url.searchParams.get('provider') === 'eq.chat-juridico' ? [{ encrypted_key: encrypted, tenant_id: 'tenant' }] : []);
-    if (table === 'collection_schedule') return Response.json([{ config: { enabled: true, time: '00:00', saturday: true, sunday: true, holidays: true } }]);
+    if (table === 'collection_schedule') return Response.json([{ config: { enabled: true, time: '00:00', saturday: true, sunday: true, holidays: true, instanceId: FINANCIAL_INSTANCE } }]);
     if (table === 'collection_settings') return Response.json([]);
+    if (table === 'customers') return Response.json([{ id: 'customer', asaas_customer_id: 'cus', status: 'ACTIVE', phone: '11999999999', responsible_name: 'Ana', office_name: 'Ana' }]);
     assert.equal(table, 'collection_schedule_jobs');
     if (options.method === 'PATCH' && url.searchParams.has('lease_until')) return Response.json([{ payment_ids: ['chatpay'], cursor: 0, sent: 0, skipped: 0 }]);
     if (options.method === 'PATCH') finalJob = body;

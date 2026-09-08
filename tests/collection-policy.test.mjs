@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("..", import.meta.url));
 const vite = await createServer({ appType: "custom", cacheDir: "node_modules/.vite-tests/collection-policy", configFile: false, root, resolve: { alias: { "@": root } }, server: { middlewareMode: true, hmr: false }, optimizeDeps: { noDiscovery: true, include: [] } });
 after(() => vite.close());
-const { previewCollection, dayDistance, collectionToday, FINANCIAL_INSTANCE, COLLECTION_STAGES } = await vite.ssrLoadModule("/lib/collection-policy.ts");
+const { previewCollection, dayDistance, collectionToday, collectionTemplateCanPreview, FINANCIAL_INSTANCE, COLLECTION_STAGES } = await vite.ssrLoadModule("/lib/collection-policy.ts");
 const payment = { id: "payment", contact_id: "contact", contact_name: "Ana", due_date: "2026-09-08", value: 100, status: "OVERDUE", invoice_url: "https://asaas.com/i/example" };
 const contact = { id: "contact", name: "Ana", is_active: true, phone: "5511999999999", instance_id: FINANCIAL_INSTANCE };
 const template = { name: "cobranca_d_mais_01", status: "APPROVED", instance_id: FINANCIAL_INSTANCE, language: "pt_BR", components: [{ type: "BODY", text: "Olá {{1}}, vencimento {{2}}: {{3}}" }] };
@@ -27,13 +27,29 @@ test("renders exactly the approved template variables", () => {
 test("blocks inactive, paid, wrong-channel, missing-template and incomplete previews", () => {
   for (const [p,c,t] of [
     [payment, null, [template]], [payment, { ...contact, is_active: false }, [template]],
+    [payment, { ...contact, status: "CANCELLED" }, [template]],
+    [payment, { ...contact, status: "FROZEN" }, [template]],
     [{ ...payment, status: "RECEIVED" }, contact, [template]],
-    [payment, { ...contact, instance_id: "other" }, [template]], [payment, contact, []],
+    [payment, contact, []],
     [{ ...payment, invoice_url: null }, contact, [template]],
     [payment, contact, [{ ...template, components: [{ type: "BODY", text: "{{4}}" }] }]],
     [payment, contact, [{ ...template, components: [{ type: "HEADER", format: "IMAGE" }] }]],
   ]) assert.ok(previewCollection(p,c,t,"2026-09-09").blocked);
+  assert.equal(previewCollection(payment, { ...contact, status: "CANCELLED" }, [template], "2026-09-09").blocked, "Cliente sem status Ativo confirmado");
   assert.equal(previewCollection(payment, contact, [template], "2026-09-11").blocked, "Sem envio hoje");
+});
+test("renders for any selected connected instance when that instance has the approved template", () => {
+  const other = "11111111-1111-4111-8111-111111111111";
+  const result = previewCollection(payment, contact, [{ ...template, instance_id: other }], "2026-09-09", undefined, undefined, other);
+  assert.equal(result.blocked, null);
+  assert.equal(result.instance_id, other);
+  assert.match(result.text, /Ana/);
+});
+test("only exposes templates that can produce a complete review", () => {
+  assert.equal(collectionTemplateCanPreview(template), true);
+  assert.equal(collectionTemplateCanPreview({ ...template, language: "en_US" }), false);
+  assert.equal(collectionTemplateCanPreview({ ...template, components: [{ type: "BODY", text: "{{4}}" }] }), false);
+  assert.equal(collectionTemplateCanPreview({ ...template, components: [{ type: "HEADER", format: "IMAGE" }] }), false);
 });
 test("keeps all linked subscriptions and removes disabled ones from current plans", async () => {
   const { presentSubscription, currentLinkedSubscriptions } = await vite.ssrLoadModule("/lib/subscription-presentation.ts");

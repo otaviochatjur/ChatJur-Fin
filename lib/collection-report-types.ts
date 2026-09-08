@@ -15,4 +15,8 @@ export type ReportSnapshot = {
   invoice_url: string | null; bankslip_url: string | null; pix_payload: string | null; pix_image: string | null; pix_expiration: string | null;
   warnings: string[];
 };
-export type ReportRow = { id: string; report_id: string; asaas_payment_id: string; snapshot: ReportSnapshot };
+export type ReportRow = {
+  id: string; report_id: string; asaas_payment_id: string; snapshot: ReportSnapshot;
+  customer_found?: boolean;
+  customer_status?: "ACTIVE" | "CANCELLED" | "FROZEN" | null;
+};
