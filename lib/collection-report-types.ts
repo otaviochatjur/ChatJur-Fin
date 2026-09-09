@@ -17,6 +17,7 @@ export type ReportSnapshot = {
 };
 export type ReportRow = {
   id: string; report_id: string; asaas_payment_id: string; snapshot: ReportSnapshot;
+  internal_customer_id?: string | null;
   customer_found?: boolean;
   customer_status?: "ACTIVE" | "CANCELLED" | "FROZEN" | null;
 };

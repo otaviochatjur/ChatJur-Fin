@@ -2,7 +2,7 @@ import { requireUser, sameOrigin } from "@/lib/auth-server";
 import { supabaseRequest } from "@/lib/supabase-server";
 import { advanceCollectionReport, createCollectionReport, readCollectionReport, reportRows } from "@/lib/collection-reports-server";
 import type { CollectionReport, ReportMode } from "@/lib/collection-report-types";
-import { customerStatusesByAsaasIds } from "@/lib/customer-asaas-aliases";
+import { customersByAsaasIds } from "@/lib/customer-asaas-aliases";
 const validId = (id: unknown): id is string => typeof id === "string" && /^[a-f0-9-]{36}$/i.test(id);
 export async function GET(request: Request) {
   try { await requireUser(); } catch { return Response.json({ error: "Entre novamente." }, { status: 401 }); }
@@ -13,8 +13,8 @@ export async function GET(request: Request) {
       if (!validId(id)) return Response.json({ error: "Relatório inválido." }, { status: 400 });
       const [report, rows, reviews] = await Promise.all([readCollectionReport(id), reportRows(id), supabaseRequest<{ after_json: unknown }[]>(`/rest/v1/audit_events?entity_type=eq.collection_review&entity_id=eq.${id}&order=created_at.desc&limit=1&select=after_json`)]);
       const customerIds = [...new Set(rows.map(row => row.snapshot.customer_id).filter(customerId => /^[A-Za-z0-9_-]+$/.test(customerId)))];
-      const statuses = await customerStatusesByAsaasIds(customerIds);
-      const enriched = rows.map(row => ({ ...row, customer_found: statuses.has(row.snapshot.customer_id), customer_status: statuses.get(row.snapshot.customer_id) }));
+      const customers = await customersByAsaasIds(customerIds);
+      const enriched = rows.map(row => ({ ...row, internal_customer_id: customers.get(row.snapshot.customer_id)?.id ?? null, customer_found: customers.has(row.snapshot.customer_id), customer_status: customers.get(row.snapshot.customer_id)?.status }));
       return Response.json({ report, rows: enriched, review: reviews[0]?.after_json ?? null }, { headers: { "Cache-Control": "no-store" } });
     }
     const offset = Math.max(0, Number(params.get("offset")) || 0);

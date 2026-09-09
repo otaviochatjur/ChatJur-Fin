@@ -159,11 +159,6 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
     });
   }, [customers, search, statusFilter, actorFilter, linkedByCustomer]);
 
-  const selected = customers.find((customer) => customer.id === selectedId) ?? null;
-  const selectedSubscriptions = selected ? subscriptions.filter((subscription) => subscription.customer_id === selected.id) : [];
-  const selectedPayments = selected ? payments.filter((payment) => payment.customer_id === selected.id) : [];
-  const selectedImplementationPayments = selected ? implementationPayments.filter((payment) => payment.customer_id === selected.id) : [];
-
   async function syncAllPayments() {
     setSyncingAll(true);
     try {
@@ -265,27 +260,42 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
           </TableBody>
         </Table>
       </section>
-      <Dialog open={Boolean(selected)} onOpenChange={open => { if (!open) setSelectedId(null); }}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
-          <DialogHeader><DialogTitle>{selected?.office_name ?? "Cliente"}</DialogTitle><DialogDescription>Acompanhamento, assinaturas, pagamentos e cadastro.</DialogDescription></DialogHeader>
-        {selected && (
-          <ClientDetail
-            key={selected.id}
-            customer={selected}
-            subscriptions={selectedSubscriptions}
-            payments={selectedPayments}
-            implementationPayments={selectedImplementationPayments}
-            plans={plans}
-            actors={actors}
-            links={links}
-            events={events.filter(event => event.customerId === selected.id)}
-            onChanged={onChanged}
-          />
-        )}
-        </DialogContent>
-      </Dialog>
+      <ClientDialog customerId={selectedId} customers={customers} subscriptions={subscriptions} payments={payments} implementationPayments={implementationPayments} plans={plans} actors={actors} links={links} events={events} onChanged={onChanged} onOpenChange={open => { if (!open) setSelectedId(null); }} />
     </div>
   );
+}
+
+export function ClientDialog({ customerId, customers, subscriptions, payments, implementationPayments, plans, actors, links, events, onChanged, onOpenChange }: {
+  customerId: string | null;
+  customers: Customer[];
+  subscriptions: Subscription[];
+  payments: Payment[];
+  implementationPayments: ImplementationPayment[];
+  plans: Plan[];
+  actors: CommercialActor[];
+  links: PaymentLink[];
+  events: CustomerActivity[];
+  onChanged: () => void;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const customer = customers.find(candidate => candidate.id === customerId) ?? null;
+  return <Dialog open={Boolean(customer)} onOpenChange={onOpenChange}>
+    <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
+      <DialogHeader><DialogTitle>{customer?.office_name ?? "Cliente"}</DialogTitle><DialogDescription>Acompanhamento, assinaturas, pagamentos e cadastro.</DialogDescription></DialogHeader>
+      {customer && <ClientDetail
+        key={customer.id}
+        customer={customer}
+        subscriptions={subscriptions.filter(subscription => subscription.customer_id === customer.id)}
+        payments={payments.filter(payment => payment.customer_id === customer.id)}
+        implementationPayments={implementationPayments.filter(payment => payment.customer_id === customer.id)}
+        plans={plans}
+        actors={actors}
+        links={links}
+        events={events.filter(event => event.customerId === customer.id)}
+        onChanged={onChanged}
+      />}
+    </DialogContent>
+  </Dialog>;
 }
 
 function ClientDetail({ customer, subscriptions, payments, implementationPayments, plans, actors, events, onChanged }: {

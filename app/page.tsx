@@ -112,7 +112,7 @@ function Dashboard() {
           {sectionId === "renewals" && <RenewalsSection />}
           {sectionId === "usage" && <PlansUsageSection links={links} actors={actors} onChanged={reload} />}
           {sectionId === "integrations" && <IntegrationsSection />}
-          {sectionId === "collections" && <CollectionsSection payments={payments} customers={customers} />}
+          {sectionId === "collections" && <CollectionsSection payments={payments} customers={customers} subscriptions={subscriptions} implementationPayments={implementationPayments} plans={plans} actors={actors} links={links} events={events} onChanged={reload} />}
           </Suspense></SectionBoundary>
         </div>
       </main>

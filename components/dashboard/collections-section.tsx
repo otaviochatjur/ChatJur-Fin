@@ -5,11 +5,13 @@ import { CollectionRuleEditor } from "./collection-rule-editor";
 import { CollectionKanban } from "./collection-kanban";
 import { CollectionHistory } from "./collection-history";
 import { CollectionReports } from "./collection-reports";
+import { ClientDialog } from "./clients-section";
 import type { CollectionReport, ReportRow } from "@/lib/collection-report-types";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { money, type Customer, type Payment } from "@/lib/metrics";
+import { money, type CommercialActor, type Customer, type ImplementationPayment, type Payment, type PaymentLink, type Plan, type Subscription } from "@/lib/metrics";
 import { type CollectionPreview } from "@/lib/collection-policy";
+import type { CustomerActivity } from "@/lib/customer-activity";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 import { runCollectionBatch, selectedCollectionPreviews } from "@/lib/collection-batch";
@@ -17,7 +19,7 @@ import type { ChatInstance } from "@/lib/chat-juridico-server";
 import { preferredCollectionInstance } from "@/lib/collection-sender";
 
 type HistoryRow = { id: string; action: string; after_json: CollectionPreview & { original_status?: string; source?: { file?: string } }; created_at: string };
-export function CollectionsSection({ payments }: { payments: Payment[]; customers: Customer[] }) {
+export function CollectionsSection({ payments, customers, subscriptions, implementationPayments, plans, actors, links, events, onChanged }: { payments: Payment[]; customers: Customer[]; subscriptions: Subscription[]; implementationPayments: ImplementationPayment[]; plans: Plan[]; actors: CommercialActor[]; links: PaymentLink[]; events: CustomerActivity[]; onChanged: () => void }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [progress, setProgress] = useState<{ completed: number; total: number } | null>(null);
   const sending = useRef(false);
@@ -33,6 +35,7 @@ export function CollectionsSection({ payments }: { payments: Payment[]; customer
   const [results, setResults] = useState<Record<string, string>>({});
   const [history, setHistory] = useState<HistoryRow[]>([]);
   const [instances, setInstances] = useState<ChatInstance[]>([]);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [senderId, setSenderId] = useState("");
   const [instanceError, setInstanceError] = useState("");
   const approvedTemplates = instances.find(instance => instance.id === senderId)?.approved_template_names ?? [];
@@ -98,8 +101,8 @@ export function CollectionsSection({ payments }: { payments: Payment[]; customer
   return <div className="space-y-6">
     <nav className="flex flex-wrap gap-2">{[["reports","Régua do dia"],["kanban","Kanban"],["rules","Configurar régua"],["history","Histórico"],["schedule","Programação"]].map(([id,label])=><Button key={id} disabled={busy} variant={view===id?"default":"outline"} onClick={()=>setView(id)}>{label}</Button>)}</nav>
     {view==="reports"&&<section className="rounded-2xl border bg-card p-5 sm:p-6"><div className="flex flex-wrap items-end justify-between gap-4"><div><h2 className="text-lg font-semibold">Número para os disparos</h2><p className="mt-1 text-sm text-muted-foreground">O número Financeiro já fica selecionado. A régua e os templates abaixo usam este remetente.</p></div><label className="min-w-72 text-sm">Enviar pelo número<select aria-label="Número remetente do Chat Jurídico" className="mt-1 block h-10 w-full rounded-md border bg-card px-3" value={senderId} disabled={busy} onChange={event => { setSenderId(event.target.value); setRows(null); setResults({}); setSelected(new Set()); }}><option value="">Escolha um número conectado</option>{instances.map(instance => <option key={instance.id} value={instance.id}>{instance.name || "WhatsApp"} · {instance.display_phone_number || instance.phone_id || instance.id} · {instance.approved_template_count ?? 0} templates</option>)}</select></label></div>{instanceError && <p role="alert" className="mt-3 text-sm text-destructive">{instanceError}</p>}</section>}
-    <fieldset disabled={busy} hidden={view!=="reports"}><CollectionReports approvedTemplates={approvedTemplates} selectedPayments={selected} onSelectionChange={setSelected} onSelect={handleReportSelect} /></fieldset>
-    {view==="kanban"&&<CollectionKanban rows={reportData}/>}
+    <fieldset disabled={busy} hidden={view!=="reports"}><CollectionReports approvedTemplates={approvedTemplates} selectedPayments={selected} onSelectionChange={setSelected} onSelect={handleReportSelect} onCustomerClick={setSelectedCustomerId} /></fieldset>
+    {view==="kanban"&&<CollectionKanban onCustomerClick={setSelectedCustomerId}/>}
     {view==="rules"&&<CollectionRuleEditor customers={reportData}/>}
     {view==="history"&&<CollectionHistory/>}
     {view==="schedule"&&<CollectionScheduleEditor/>}
@@ -119,5 +122,6 @@ export function CollectionsSection({ payments }: { payments: Payment[]; customer
     {!!blocked.length && <section className="overflow-hidden rounded-2xl border bg-card"><div className="p-5"><h3 className="font-semibold">Sem envio · {blocked.length}</h3><p className="text-sm text-muted-foreground">Clientes sem status Ativo e pendências de telefone, template ou canal ficam fora da aprovação.</p></div><Table><TableHeader><TableRow><TableHead>Cliente</TableHead><TableHead>Vencimento</TableHead><TableHead>Valor</TableHead><TableHead>Motivo</TableHead></TableRow></TableHeader><TableBody>{blocked.map(row => <TableRow key={row.payment.id}><TableCell>{row.contact?.name ?? row.payment.contact_name ?? "Não identificado"}</TableCell><TableCell>{row.payment.due_date}</TableCell><TableCell>{money.format(row.payment.value)}</TableCell><TableCell>{row.blocked}</TableCell></TableRow>)}</TableBody></Table></section>}
     {!!history.length && <p className="text-sm text-muted-foreground">Histórico exportado: {history.filter(row => row.action === "SENT").length} envio(s) confirmado(s), {history.filter(row => row.action !== "SENT").length} tentativa(s) para revisão.</p>}
     </div>
+    <ClientDialog customerId={selectedCustomerId} customers={customers} subscriptions={subscriptions} payments={payments} implementationPayments={implementationPayments} plans={plans} actors={actors} links={links} events={events} onChanged={onChanged} onOpenChange={open => { if (!open) setSelectedCustomerId(null); }} />
   </div>;
 }
