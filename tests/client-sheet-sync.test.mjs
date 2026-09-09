@@ -29,6 +29,8 @@ test("reconciles changed client numbers, inserts complete rows and reports syste
       { Email: "ANA@example.com", office_id: "", "Número do cliente": 20, "Nome do Escritório": "Nome atualizado", "Assinado em": "01/09/2026" },
       { Email: "novo@example.com", office_id: 21, "Nome do Escritório": "Cliente novo", "Assinado em": "02/09/2026" },
       { Email: "sem-data@example.com", office_id: 22, "Nome do Escritório": "Sem data" },
+      { Email: "shared@example.com", office_id: 31, "Nome do Escritório": "Compartilhado A", "Assinado em": "03/09/2026" },
+      { Email: "shared@example.com", office_id: 32, "Nome do Escritório": "Compartilhado B", "Assinado em": "04/09/2026" },
     ]);
     const table = url.pathname.split("/").at(-1);
     if (table === "customers" && (!options.method || options.method === "GET")) return Response.json(customers);
@@ -49,13 +51,16 @@ test("reconciles changed client numbers, inserts complete rows and reports syste
   };
   try {
     const result = await withWebhookTenant({ id: "tenant-a", legacy: true }, () => syncClientsFromSheet());
-    assert.equal(result.created, 1);
+    assert.equal(result.created, 3);
     assert.equal(result.updated, 1);
     assert.deepEqual(result.skippedWithoutSignedAt, ["sem-data@example.com"]);
     assert.deepEqual(result.systemOnlyEmails, ["fora@example.com"]);
+    assert.deepEqual(result.duplicateSheetEmails, ["shared@example.com"]);
+    assert.deepEqual(result.unresolvedRows, []);
     assert.equal(customers.find(row => row.id === "customer-a").external_office_id, "20");
     assert.equal(customers.find(row => row.id === "customer-a").signed_at, "2026-09-01");
     assert.equal(customers.find(row => row.email === "novo@example.com").signed_at, "2026-09-02");
+    assert.deepEqual(customers.filter(row => row.email === "shared@example.com").map(row => row.external_office_id).sort(), ["31", "32"]);
     assert.equal(audits[0].entity_type, "client_sheet_sync");
   } finally {
     globalThis.fetch = previousFetch;

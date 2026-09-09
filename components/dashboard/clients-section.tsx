@@ -191,7 +191,7 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
       const result = data as ClientSheetSyncResult;
       setSheetSyncResult(result);
       setShowSheetSyncResult(true);
-      const pending = result.systemOnlyEmails.length + result.skippedWithoutSignedAt.length + result.duplicateSheetEmails.length + result.duplicateSystemEmails.length + result.officeIdConflicts.length;
+      const pending = result.systemOnlyEmails.length + result.skippedWithoutSignedAt.length + result.duplicateOfficeIds.length + result.officeIdConflicts.length + result.unresolvedRows.length;
       if (pending) toast.warning(`Base atualizada com ${pending} pendência(s) para revisar.`);
       else toast.success(`Base atualizada: ${result.created} cliente(s) incluído(s) e ${result.updated} atualizado(s).`);
       onChanged();
@@ -299,10 +299,11 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
             </div>
             {sheetSyncResult.systemOnlyEmails.length > 0 && <SyncIssue title={`No sistema, mas fora da Base de Clientes (${sheetSyncResult.systemOnlyEmails.length})`} items={sheetSyncResult.systemOnlyEmails} />}
             {sheetSyncResult.skippedWithoutSignedAt.length > 0 && <SyncIssue title={`Sem data “Assinado em” (${sheetSyncResult.skippedWithoutSignedAt.length})`} items={sheetSyncResult.skippedWithoutSignedAt} tone="danger" />}
-            {sheetSyncResult.duplicateSheetEmails.length > 0 && <SyncIssue title="E-mails repetidos na Base de Clientes" items={sheetSyncResult.duplicateSheetEmails} tone="danger" />}
-            {sheetSyncResult.duplicateSystemEmails.length > 0 && <SyncIssue title="E-mails repetidos no sistema" items={sheetSyncResult.duplicateSystemEmails} tone="danger" />}
+            {sheetSyncResult.duplicateSheetEmails.length > 0 && <SyncIssue title="E-mails compartilhados na Base — clientes mantidos separados" items={sheetSyncResult.duplicateSheetEmails} />}
+            {sheetSyncResult.duplicateSystemEmails.length > 0 && <SyncIssue title="E-mails compartilhados no sistema — cadastros mantidos separados" items={sheetSyncResult.duplicateSystemEmails} />}
             {sheetSyncResult.duplicateOfficeIds.length > 0 && <SyncIssue title="Números de cliente repetidos na Base" items={sheetSyncResult.duplicateOfficeIds} tone="danger" />}
             {sheetSyncResult.officeIdConflicts.length > 0 && <SyncIssue title="Conflitos no número do cliente" items={sheetSyncResult.officeIdConflicts} tone="danger" />}
+            {sheetSyncResult.unresolvedRows.length > 0 && <SyncIssue title="Linhas que ainda não podem ser separadas" items={sheetSyncResult.unresolvedRows} tone="danger" />}
             {sheetSyncResult.ignoredWithoutEmail > 0 && <p className="rounded-xl bg-amber-50 p-3 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">{sheetSyncResult.ignoredWithoutEmail} linha(s) sem e-mail foram ignoradas.</p>}
           </div>}
         </DialogContent>

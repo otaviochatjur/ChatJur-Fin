@@ -37,7 +37,7 @@ export type ClientSheetRow = {
 
 type RawRow = Record<string, unknown>;
 
-type SheetRows = { byEmail: Map<string, ClientSheetRow>; duplicateEmails: string[]; ignoredWithoutEmail: number };
+type SheetRows = { rows: ClientSheetRow[]; byEmail: Map<string, ClientSheetRow>; duplicateEmails: string[]; ignoredWithoutEmail: number };
 
 let cache: (SheetRows & { fetchedAt: number }) | null = null;
 
@@ -93,7 +93,7 @@ function hasClientData(row: RawRow) {
 
 async function fetchSheetRows(): Promise<SheetRows> {
   const url = process.env.CLIENTS_SHEET_WEBHOOK_URL;
-  if (!url) return { byEmail: new Map(), duplicateEmails: [], ignoredWithoutEmail: 0 };
+  if (!url) return { rows: [], byEmail: new Map(), duplicateEmails: [], ignoredWithoutEmail: 0 };
 
   const authValue = process.env.CLIENTS_SHEET_WEBHOOK_AUTH;
   const response = await fetch(url, {
@@ -108,16 +108,18 @@ async function fetchSheetRows(): Promise<SheetRows> {
   }
 
   const byEmail = new Map<string, ClientSheetRow>();
+  const parsedRows: ClientSheetRow[] = [];
   const duplicateEmails = new Set<string>();
   let ignoredWithoutEmail = 0;
   for (const raw of rows) {
     const row = parseRow(raw);
     if (!row) { if (hasClientData(raw)) ignoredWithoutEmail += 1; continue; }
+    parsedRows.push(row);
     if (byEmail.has(row.email)) duplicateEmails.add(row.email);
     else byEmail.set(row.email, row);
   }
   for (const email of duplicateEmails) byEmail.delete(email);
-  return { byEmail, duplicateEmails: [...duplicateEmails].sort(), ignoredWithoutEmail };
+  return { rows: parsedRows, byEmail, duplicateEmails: [...duplicateEmails].sort(), ignoredWithoutEmail };
 }
 
 async function getSheetRows(fresh = false): Promise<SheetRows | null> {
@@ -149,7 +151,7 @@ export async function isEmailInClientsSheet(email: string | null | undefined): P
 
   const rows = await getSheetRows();
   if (!rows) return false; // couldn't verify (webhook down, no cache) — fail closed
-  return rows.byEmail.has(normalized);
+  return rows.rows.some(row => row.email === normalized);
 }
 
 /**

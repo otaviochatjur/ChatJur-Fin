@@ -26,6 +26,7 @@ export type ClientSheetSyncResult = {
   duplicateSheetEmails: string[];
   duplicateSystemEmails: string[];
   duplicateOfficeIds: string[];
+  unresolvedRows: string[];
   officeIdConflicts: string[];
   systemOnlyEmails: string[];
   systemCustomersWithoutEmail: string[];
@@ -73,7 +74,7 @@ export async function syncClientsFromSheet(options: { dryRun?: boolean } = {}): 
   if (!tenant.legacy) throw new Error("A Base de Clientes está disponível somente para a conta principal.");
 
   const [sheet, customers] = await Promise.all([listClientsInSheet(), allCustomers()]);
-  const sourceRows = [...sheet.byEmail.values()];
+  const sourceRows = sheet.rows;
   const systemByEmail = new Map<string, StoredCustomer[]>();
   for (const customer of customers) {
     const email = normalizedEmail(customer.email);
@@ -84,6 +85,7 @@ export async function syncClientsFromSheet(options: { dryRun?: boolean } = {}): 
   }
 
   const duplicateSystemEmails = [...systemByEmail].filter(([, rows]) => rows.length > 1).map(([email]) => email).sort();
+  const duplicateSheetEmailSet = new Set(sheet.duplicateEmails);
   const desiredOfficeOwners = new Map<string, ClientSheetRow[]>();
   for (const row of sourceRows) {
     if (!row.officeId) continue;
@@ -94,32 +96,59 @@ export async function syncClientsFromSheet(options: { dryRun?: boolean } = {}): 
   const duplicateOfficeIds = [...desiredOfficeOwners].filter(([, rows]) => rows.length > 1).map(([id]) => id).sort();
   const duplicateOfficeIdSet = new Set(duplicateOfficeIds);
   const currentOfficeOwner = new Map(customers.filter(row => row.external_office_id).map(row => [row.external_office_id!, row]));
+  const matchedByRow = new Map<ClientSheetRow, StoredCustomer | null>();
+  const matchedCustomerIds = new Set<string>();
+  const unresolvedRows: string[] = [];
+  const unresolvedRowSet = new Set<ClientSheetRow>();
+  for (const row of sourceRows) {
+    const officeMatch = row.officeId && !duplicateOfficeIdSet.has(row.officeId) ? currentOfficeOwner.get(row.officeId) ?? null : null;
+    const emailMatches = systemByEmail.get(row.email) ?? [];
+    const emailMatch = !duplicateSheetEmailSet.has(row.email) && emailMatches.length === 1 ? emailMatches[0] : null;
+    const matched = officeMatch ?? emailMatch;
+    if (matched && !matchedCustomerIds.has(matched.id)) {
+      matchedByRow.set(row, matched);
+      matchedCustomerIds.add(matched.id);
+      continue;
+    }
+    if (duplicateSheetEmailSet.has(row.email) && !row.officeId) {
+      matchedByRow.set(row, null);
+      unresolvedRowSet.add(row);
+      unresolvedRows.push(`${row.email}: informe números distintos para manter os cadastros separados`);
+      continue;
+    }
+    if (!matched && emailMatches.length > 1 && !officeMatch) {
+      matchedByRow.set(row, null);
+      unresolvedRowSet.add(row);
+      unresolvedRows.push(`${row.email}: e-mail repetido no sistema e número sem correspondência`);
+      continue;
+    }
+    matchedByRow.set(row, matched);
+  }
   const rowByCustomerId = new Map<string, ClientSheetRow>();
   for (const row of sourceRows) {
-    const matches = systemByEmail.get(row.email) ?? [];
-    if (matches.length === 1) rowByCustomerId.set(matches[0].id, row);
+    const matched = matchedByRow.get(row);
+    if (matched) rowByCustomerId.set(matched.id, row);
   }
 
   const officeIdConflicts: string[] = [];
-  const canAssignOfficeId = new Map<string, boolean>();
+  const canAssignOfficeId = new Map<ClientSheetRow, boolean>();
   for (const row of sourceRows) {
-    if (!row.officeId || duplicateOfficeIdSet.has(row.officeId)) { canAssignOfficeId.set(row.email, false); continue; }
+    if (!row.officeId || duplicateOfficeIdSet.has(row.officeId)) { canAssignOfficeId.set(row, false); continue; }
     const owner = currentOfficeOwner.get(row.officeId);
-    const matched = (systemByEmail.get(row.email) ?? []).length === 1 ? systemByEmail.get(row.email)![0] : null;
-    if (!owner || owner.id === matched?.id) { canAssignOfficeId.set(row.email, true); continue; }
+    const matched = matchedByRow.get(row);
+    if (!owner || owner.id === matched?.id) { canAssignOfficeId.set(row, true); continue; }
     const ownerTarget = rowByCustomerId.get(owner.id)?.officeId;
     if (ownerTarget && ownerTarget !== row.officeId && !duplicateOfficeIdSet.has(ownerTarget)) {
-      canAssignOfficeId.set(row.email, true);
+      canAssignOfficeId.set(row, true);
       continue;
     }
-    canAssignOfficeId.set(row.email, false);
+    canAssignOfficeId.set(row, false);
     officeIdConflicts.push(`${row.email}: número ${row.officeId} já pertence a ${owner.email ?? owner.office_name}`);
   }
 
   const releases = sourceRows.flatMap(row => {
-    const matches = systemByEmail.get(row.email) ?? [];
-    if (matches.length !== 1 || !row.officeId || !canAssignOfficeId.get(row.email)) return [];
-    const customer = matches[0];
+    const customer = matchedByRow.get(row);
+    if (!customer || !row.officeId || !canAssignOfficeId.get(row)) return [];
     return customer.external_office_id && customer.external_office_id !== row.officeId ? [customer] : [];
   });
 
@@ -135,11 +164,10 @@ export async function syncClientsFromSheet(options: { dryRun?: boolean } = {}): 
   const skippedWithoutSignedAt: string[] = [];
   try {
     for (const row of sourceRows) {
-      const matches = systemByEmail.get(row.email) ?? [];
-      if (matches.length > 1) continue;
-      const existing = matches[0] ?? null;
+      if (unresolvedRowSet.has(row)) continue;
+      const existing = matchedByRow.get(row) ?? null;
       const body: Record<string, unknown> = intakeFields(row);
-      if (row.officeId && canAssignOfficeId.get(row.email)) body.external_office_id = row.officeId;
+      if (row.officeId && canAssignOfficeId.get(row)) body.external_office_id = row.officeId;
 
       if (existing) {
         // A missing date in the source is reported, but never erases a date
@@ -158,7 +186,7 @@ export async function syncClientsFromSheet(options: { dryRun?: boolean } = {}): 
         body: {
           ...body,
           office_name: row.officeName ?? row.responsibleName ?? row.email,
-          external_office_id: row.officeId && canAssignOfficeId.get(row.email) ? row.officeId : null,
+          external_office_id: row.officeId && canAssignOfficeId.get(row) ? row.officeId : null,
           status: "ACTIVE",
           source_channel: row.sourceChannel ?? "BASE_CLIENTES",
         },
@@ -175,11 +203,11 @@ export async function syncClientsFromSheet(options: { dryRun?: boolean } = {}): 
     throw error;
   }
 
-  const sourceEmails = new Set([...sheet.byEmail.keys(), ...sheet.duplicateEmails]);
+  const sourceEmails = new Set(sourceRows.map(row => row.email));
   const systemOnlyEmails = [...systemByEmail.keys()].filter(email => !sourceEmails.has(email)).sort();
   const systemCustomersWithoutEmail = customers.filter(row => !normalizedEmail(row.email)).map(row => row.office_name).sort();
   const result: ClientSheetSyncResult = {
-    sourceRows: sourceRows.length + sheet.duplicateEmails.length,
+    sourceRows: sourceRows.length,
     created,
     updated,
     unchanged,
@@ -188,6 +216,7 @@ export async function syncClientsFromSheet(options: { dryRun?: boolean } = {}): 
     duplicateSheetEmails: sheet.duplicateEmails,
     duplicateSystemEmails,
     duplicateOfficeIds,
+    unresolvedRows: [...new Set(unresolvedRows)].sort(),
     officeIdConflicts: officeIdConflicts.sort(),
     systemOnlyEmails,
     systemCustomersWithoutEmail,
