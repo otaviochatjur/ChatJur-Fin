@@ -16,11 +16,8 @@
 // treat that as *not* allowed rather than letting unverified customers in,
 // falling back to the last known-good list if we have one cached.
 //
-// Important: this module only ever *creates* new customers from the sheet.
-// It is never consulted again for a customer that already exists in our
-// database — once created here, the sheet can keep changing and it will
-// have zero effect on that customer's record. Supabase is the source of
-// truth from the moment the customer is created.
+// The sheet owns intake/contact fields. Operational fields (status, plans,
+// subscriptions, payments and activity) remain owned by this application.
 
 const TTL_MS = 5 * 60 * 1000; // 5 minutes — cheap to keep fresh without hammering n8n/Sheets on every webhook delivery.
 const HEADER_NAME = "sisfin-auth";
@@ -31,14 +28,21 @@ export type ClientSheetRow = {
   officeName: string | null;
   responsibleName: string | null;
   phone: string | null;
+  city: string | null;
+  state: string | null;
+  serviceArea: string | null;
+  sourceChannel: string | null;
+  signedAt: string | null;
 };
 
 type RawRow = Record<string, unknown>;
 
-let cache: { byEmail: Map<string, ClientSheetRow>; fetchedAt: number } | null = null;
+type SheetRows = { byEmail: Map<string, ClientSheetRow>; duplicateEmails: string[]; ignoredWithoutEmail: number };
+
+let cache: (SheetRows & { fetchedAt: number }) | null = null;
 
 function clean(value: unknown): string | null {
-  const trimmed = typeof value === "string" ? value.trim() : "";
+  const trimmed = typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
   return trimmed.length > 0 ? trimmed : null;
 }
 
@@ -47,21 +51,49 @@ function normalizeEmail(email: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function first(row: RawRow, keys: string[]): unknown {
+  for (const key of keys) if (clean(row[key]) !== null) return row[key];
+  return null;
+}
+
+export function parseClientSheetDate(value: unknown): string | null {
+  const raw = clean(value);
+  if (!raw) return null;
+  const br = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(raw);
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:T.*)?$/.exec(raw);
+  const parts = br ? [br[3], br[2], br[1]] : iso ? [iso[1], iso[2], iso[3]] : null;
+  if (!parts) return null;
+  const [year, month, day] = parts.map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
 function parseRow(row: RawRow): ClientSheetRow | null {
   const email = normalizeEmail(row.Email);
   if (!email) return null;
   return {
     email,
-    officeId: clean(row.office_id),
-    officeName: clean(row["Nome do Escritório"]),
-    responsibleName: clean(row["Nome do Responsável"]),
-    phone: clean(row["Whatsapp Responsável"]),
+    officeId: clean(first(row, ["office_id", "Número do cliente", "Número do Cliente", "Numero do cliente", "Nº do cliente"])),
+    officeName: clean(first(row, ["Nome do Escritório", "Nome do Escritorio"])),
+    responsibleName: clean(first(row, ["Nome do Responsável", "Nome do Responsavel"])),
+    phone: clean(first(row, ["Whatsapp Responsável", "WhatsApp Responsável", "Whatsapp Responsavel"])),
+    city: clean(row.Cidade),
+    state: clean(row.Estado),
+    serviceArea: clean(first(row, ["Área de Atendimento", "Area de Atendimento"])),
+    sourceChannel: clean(row["Veio de"]) ?? clean(row.Parceiro),
+    signedAt: parseClientSheetDate(first(row, ["Assinado em", "Data de assinatura"])),
   };
 }
 
-async function fetchSheetRows(): Promise<Map<string, ClientSheetRow>> {
+function hasClientData(row: RawRow) {
+  return [row.Email, row.office_id, row["Número do cliente"], row["Número do Cliente"], row["Nome do Escritório"], row["Nome do Responsável"], row["Assinado em"]]
+    .some(value => clean(value) !== null);
+}
+
+async function fetchSheetRows(): Promise<SheetRows> {
   const url = process.env.CLIENTS_SHEET_WEBHOOK_URL;
-  if (!url) return new Map();
+  if (!url) return { byEmail: new Map(), duplicateEmails: [], ignoredWithoutEmail: 0 };
 
   const authValue = process.env.CLIENTS_SHEET_WEBHOOK_AUTH;
   const response = await fetch(url, {
@@ -76,25 +108,30 @@ async function fetchSheetRows(): Promise<Map<string, ClientSheetRow>> {
   }
 
   const byEmail = new Map<string, ClientSheetRow>();
+  const duplicateEmails = new Set<string>();
+  let ignoredWithoutEmail = 0;
   for (const raw of rows) {
     const row = parseRow(raw);
-    if (row) byEmail.set(row.email, row);
+    if (!row) { if (hasClientData(raw)) ignoredWithoutEmail += 1; continue; }
+    if (byEmail.has(row.email)) duplicateEmails.add(row.email);
+    else byEmail.set(row.email, row);
   }
-  return byEmail;
+  for (const email of duplicateEmails) byEmail.delete(email);
+  return { byEmail, duplicateEmails: [...duplicateEmails].sort(), ignoredWithoutEmail };
 }
 
-async function getSheetRows(): Promise<Map<string, ClientSheetRow> | null> {
+async function getSheetRows(fresh = false): Promise<SheetRows | null> {
   const now = Date.now();
-  if (cache && now - cache.fetchedAt < TTL_MS) return cache.byEmail;
+  if (!fresh && cache && now - cache.fetchedAt < TTL_MS) return cache;
 
   try {
-    const byEmail = await fetchSheetRows();
-    cache = { byEmail, fetchedAt: now };
-    return byEmail;
+    const rows = await fetchSheetRows();
+    cache = { ...rows, fetchedAt: now };
+    return rows;
   } catch (error) {
     console.error("[clients-allowlist] failed to refresh Base de Clientes sheet:", error);
     // Serve a stale-but-known list rather than nothing, if we have one.
-    return cache?.byEmail ?? null;
+    return cache ?? null;
   }
 }
 
@@ -112,7 +149,7 @@ export async function isEmailInClientsSheet(email: string | null | undefined): P
 
   const rows = await getSheetRows();
   if (!rows) return false; // couldn't verify (webhook down, no cache) — fail closed
-  return rows.has(normalized);
+  return rows.byEmail.has(normalized);
 }
 
 /**
@@ -130,5 +167,13 @@ export async function findClientInSheet(email: string | null | undefined): Promi
 
   const rows = await getSheetRows();
   if (!rows) return null;
-  return rows.get(normalized) ?? null;
+  return rows.byEmail.get(normalized) ?? null;
+}
+
+/** Returns a fresh, de-duplicated snapshot for the explicit reconciliation flow. */
+export async function listClientsInSheet(): Promise<SheetRows> {
+  if (!process.env.CLIENTS_SHEET_WEBHOOK_URL) throw new Error("Integração com a Base de Clientes não configurada.");
+  const rows = await getSheetRows(true);
+  if (!rows) throw new Error("Não foi possível consultar a Base de Clientes.");
+  return rows;
 }

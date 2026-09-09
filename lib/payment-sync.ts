@@ -63,14 +63,15 @@ async function resolveCustomer(payment: AsaasPayment, actorId: string | null): P
 
   if (details.email) {
     const matches = await supabaseRequest<CustomerRow[]>(
-      `/rest/v1/customers?select=id,email,asaas_customer_id,acquisition_actor_id,status&email=eq.${encodeURIComponent(details.email)}&asaas_customer_id=is.null`,
+      `/rest/v1/customers?select=id,email,asaas_customer_id,acquisition_actor_id,signed_at,status&email=eq.${encodeURIComponent(details.email)}&asaas_customer_id=is.null`,
     );
     const byEmail = matches.length === 1 ? matches[0] : null;
     if (byEmail) {
+      const sheetRow = (await currentTenant()).legacy ? await findClientInSheet(details.email) : null;
       const [updated] = await supabaseRequest<CustomerRow[]>(`/rest/v1/customers?id=eq.${byEmail.id}`, {
         method: "PATCH",
         prefer: "return=representation",
-        body: { asaas_customer_id: payment.customer },
+        body: { asaas_customer_id: payment.customer, ...(sheetRow?.signedAt ? { signed_at: sheetRow.signedAt } : {}) },
       });
       if (updated) await rememberCustomerAsaasId(updated, payment.customer);
       return updated;
@@ -82,13 +83,14 @@ async function resolveCustomer(payment: AsaasPayment, actorId: string | null): P
   // OfficeId) is the single manual intake point — we only auto-create a
   // customer record here if it's listed there, or if the gate isn't
   // configured at all (CLIENTS_SHEET_WEBHOOK_URL unset), in which case
-  // everything Asaas reports is trusted directly. Once created, this row is
-  // never touched by the sheet again: from here on Supabase is the source
-  // of truth and edits made in the app (plan changes, status, etc.) are
-  // final.
+  // everything Asaas reports is trusted directly. The explicit sheet sync
+  // may refresh intake fields later; operational edits made in the app
+  // (status, plans, payments and activity) remain final. Every new client
+  // from the sheet must include its signature date.
   const gateEnabled = (await currentTenant()).legacy && Boolean(process.env.CLIENTS_SHEET_WEBHOOK_URL);
   const sheetRow = gateEnabled && details.email ? await findClientInSheet(details.email) : null;
   if (gateEnabled && !sheetRow) return null;
+  if (gateEnabled && !sheetRow?.signedAt) return null;
 
   // Same office, second Asaas customer id: happens when a client ends up
   // with more than one Asaas customer record for the same office (re-signed
@@ -101,11 +103,14 @@ async function resolveCustomer(payment: AsaasPayment, actorId: string | null): P
   // still attach correctly via `customer_id`.
   if (sheetRow?.officeId) {
     const byOffice = await findOne<CustomerRow>(
-      `/rest/v1/customers?select=id,email,asaas_customer_id,acquisition_actor_id,status&external_office_id=eq.${encodeURIComponent(sheetRow.officeId)}`,
+      `/rest/v1/customers?select=id,email,asaas_customer_id,acquisition_actor_id,signed_at,status&external_office_id=eq.${encodeURIComponent(sheetRow.officeId)}`,
     );
     if (byOffice) {
+      if (sheetRow.signedAt && byOffice.signed_at !== sheetRow.signedAt) {
+        await supabaseRequest(`/rest/v1/customers?id=eq.${encodeURIComponent(byOffice.id)}`, { method: "PATCH", body: { signed_at: sheetRow.signedAt } });
+      }
       await rememberCustomerAsaasId(byOffice, payment.customer);
-      return byOffice;
+      return { ...byOffice, signed_at: sheetRow.signedAt ?? byOffice.signed_at };
     }
   }
 
@@ -119,6 +124,7 @@ async function resolveCustomer(payment: AsaasPayment, actorId: string | null): P
       responsible_name: sheetRow?.responsibleName ?? details.name ?? null,
       email: details.email ?? null,
       phone: sheetRow?.phone ?? details.mobilePhone ?? details.phone ?? null,
+      signed_at: sheetRow?.signedAt ?? null,
       acquisition_actor_id: actorId,
       source_channel: "ASAAS_SYNC",
       status: "ACTIVE",

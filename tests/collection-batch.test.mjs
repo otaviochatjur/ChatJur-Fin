@@ -21,6 +21,13 @@ test('pause takes effect after the current message, preserving remaining selecti
   const count=await runCollectionBatch([row('a'),row('b')],async r=>{calls.push(r.payment.id);stop=true;return {ok:true,message:'Enviado'};},()=>{},()=>stop);
   assert.equal(count,1);assert.deepEqual(calls,['a']);
 });
+test('continues after a confirmed rejection and paces consecutive template sends',async()=>{
+  const calls=[],results=[],waits=[];let clock=0;
+  await runCollectionBatch([row('a'),row('b'),row('c')],async r=>{calls.push(r.payment.id);return r.payment.id==='b'?{ok:false,message:'rate limit',continueBatch:true}:{ok:true,message:'Enviado'};},(r,result)=>results.push([r.payment.id,result.ok]),()=>false,{minimumIntervalMs:12500,now:()=>clock,wait:async milliseconds=>{waits.push(milliseconds);clock+=milliseconds;}});
+  assert.deepEqual(calls,['a','b','c']);
+  assert.deepEqual(results,[['a',true],['b',false],['c',true]]);
+  assert.deepEqual(waits,[12500,12500]);
+});
 test('Tally form listing follows pages and never follows redirects with credentials',async()=>{
   const {listTallyForms}=await vite.ssrLoadModule('/lib/tally-forms.ts');
   const original=globalThis.fetch;let calls=0;

@@ -38,6 +38,13 @@ test("blocks inactive, paid, wrong-channel, missing-template and incomplete prev
   assert.equal(previewCollection(payment, { ...contact, status: "CANCELLED" }, [template], "2026-09-09").blocked, "Cliente sem status Ativo confirmado");
   assert.equal(previewCollection(payment, contact, [template], "2026-09-11").blocked, "Sem envio hoje");
 });
+test("maps the second variable to the invoice link for templates without a due-date placeholder", () => {
+  const linkTemplate = { ...template, name: "cobranca_d_mais_5", components: [{ type: "BODY", text: "Olá {{1}}. Reative pelo link: {{2}}" }] };
+  const result = previewCollection({ ...payment, due_date: "2026-09-04" }, contact, [linkTemplate], "2026-09-09");
+  assert.equal(result.blocked, null);
+  assert.equal(result.text, "Olá Ana. Reative pelo link: https://asaas.com/i/example");
+  assert.deepEqual(result.parameters, { body_1: "Ana", body_2: payment.invoice_url });
+});
 test("renders for any selected connected instance when that instance has the approved template", () => {
   const other = "11111111-1111-4111-8111-111111111111";
   const result = previewCollection(payment, contact, [{ ...template, instance_id: other }], "2026-09-09", undefined, undefined, other);

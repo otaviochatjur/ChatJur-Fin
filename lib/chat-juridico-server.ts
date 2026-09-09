@@ -3,7 +3,15 @@ import { readIntegrationKey } from "./integrations-server";
 export type ChatInstance = { id: string; name: string | null; phone_id: string | null; display_phone_number: string | null; is_connected: boolean; api_provider?: string | null; approved_template_count?: number; approved_template_names?: string[] };
 export type ChatConversation = { id: string; instance_id: string; contact_id: string; phone?: string | null };
 export class ChatRequestError extends Error {
-  constructor(message: string, public status: number, public code?: string, public details?: Record<string, unknown>) { super(message); }
+  constructor(message: string, public status: number, public code?: string, public details?: Record<string, unknown>, public retryAfterMs?: number) { super(message); }
+}
+
+function retryAfterMs(response: Response) {
+  const retryAfter = response.headers.get("Retry-After");
+  if (retryAfter && /^\d+(?:\.\d+)?$/.test(retryAfter)) return Math.ceil(Number(retryAfter) * 1000);
+  const reset = response.headers.get("X-RateLimit-Reset");
+  if (reset && /^\d+$/.test(reset)) return Math.max(1000, Number(reset) * 1000 - Date.now() + 1000);
+  return undefined;
 }
 
 export async function chatRequest<T>(path: string, options: { method?: string; body?: unknown; idempotencyKey?: string; apiKey?: string } = {}): Promise<T> {
@@ -18,7 +26,7 @@ export async function chatRequest<T>(path: string, options: { method?: string; b
   if (response.status >= 300 && response.status < 400) throw new Error("O Chat Jurídico retornou um redirecionamento inesperado. A chave não foi encaminhada para outro endereço.");
   if (!response.ok) {
     const payload = await response.json().catch(() => null) as { error?: { code?: string; message?: string; [key: string]: unknown } } | null;
-    throw new ChatRequestError(payload?.error?.message ?? `Chat Jurídico retornou ${response.status}. Confira a chave e as permissões.`, response.status, payload?.error?.code, payload?.error);
+    throw new ChatRequestError(payload?.error?.message ?? `Chat Jurídico retornou ${response.status}. Confira a chave e as permissões.`, response.status, payload?.error?.code, payload?.error, retryAfterMs(response));
   }
   return response.json() as Promise<T>;
 }

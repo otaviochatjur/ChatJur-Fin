@@ -61,19 +61,26 @@ export function CollectionsSection({ payments, customers, subscriptions, impleme
   async function sendBatch(batch: CollectionPreview[]) {
     if (sending.current) return;
     if (!batch.length) return;
+    const sentToday = new Set(reportData.filter(row => row.sent_today_at).map(row => row.snapshot.payment_id));
+    const repeated = batch.filter(row => sentToday.has(row.payment.asaas_payment_id ?? row.payment.id));
+    if (repeated.length && !window.confirm(`${repeated.length} cliente(s) selecionado(s) já receberam mensagem hoje. Deseja repetir o envio mesmo assim?`)) return;
     sending.current = true; stopRequested.current = false;
     setBusy(true); setError(""); setProgress({ completed: 0, total: batch.length });
     try {
       await runCollectionBatch(batch, async row => {
         const r = await fetch("/api/collections", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ paymentId: row.payment.id, instanceId: senderId, approval: row.approval, approved: true }), signal: AbortSignal.timeout(60000) });
         const data = await r.json();
-        return { ok: r.ok, message: r.ok ? (data.skipped ? "Já enviada anteriormente" : "Enviado") : data.error ?? "Falha no envio. Consulte o histórico." };
+        return { ok: r.ok, message: r.ok ? (data.skipped ? "Já enviada anteriormente" : "Enviado") : data.error ?? "Falha no envio. Consulte o histórico.", continueBatch: data.continueBatch === true, retryAfterMs: Number(data.retryAfterMs) || undefined };
       }, (row, result, completed) => {
         setResults(current => ({ ...current, [row.payment.id]: result.message }));
-        if (result.ok) setSelected(current => { const next = new Set(current); next.delete(row.payment.asaas_payment_id ?? row.payment.id); return next; });
+        if (result.ok) {
+          const paymentId = row.payment.asaas_payment_id ?? row.payment.id;
+          setSelected(current => { const next = new Set(current); next.delete(paymentId); return next; });
+          setReportData(current => current.map(reportRow => reportRow.snapshot.payment_id === paymentId ? { ...reportRow, sent_today_at: reportRow.sent_today_at ?? new Date().toISOString(), sent_today_stage: row.stage } : reportRow));
+        }
         setProgress({ completed, total: batch.length });
-        if (!result.ok) setError(`Lote pausado: ${result.message}`);
-      }, () => stopRequested.current);
+        if (!result.ok) setError(result.continueBatch ? `${row.contact?.name ?? row.payment.contact_name}: ${result.message}. O lote continuou com os demais.` : `Lote pausado: ${result.message}`);
+      }, () => stopRequested.current, { minimumIntervalMs: 12_500 });
     } finally { sending.current = false; setBusy(false); }
   }
   async function sendSelected() { await sendBatch(selectedCollectionPreviews(rows ?? [], selected, results)); }

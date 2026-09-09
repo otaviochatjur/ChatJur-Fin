@@ -147,7 +147,7 @@ test("a payment without paymentLink still imports a payer listed in Base de Clie
     }
     if (url.host === "sheet.invalid") {
       assert.equal(options.headers["sisfin-auth"], "sheet-test");
-      return Response.json([{ Email: " davilessa2002@gmail.com ", office_id: "", "Nome do Escritório": "DAVI LESSA", "Nome do Responsável": "DAVI LESSA", "Whatsapp Responsável": "21 99681-2002" }]);
+      return Response.json([{ Email: " davilessa2002@gmail.com ", office_id: "", "Nome do Escritório": "DAVI LESSA", "Nome do Responsável": "DAVI LESSA", "Whatsapp Responsável": "21 99681-2002", "Assinado em": "08/09/2026" }]);
     }
     if (url.host === "db.invalid") {
       const table = url.pathname.split("/").at(-1);
@@ -175,6 +175,7 @@ test("a payment without paymentLink still imports a payer listed in Base de Clie
     assert.equal(customer.office_name, "DAVI LESSA");
     assert.equal(customer.acquisition_actor_id, null);
     assert.equal(customer.status, "ACTIVE");
+    assert.equal(customer.signed_at, "2026-09-08");
     const alias = mutations.find(row => row.table === "customer_asaas_aliases").body;
     assert.equal(alias.customer_id, "customer-davi");
     assert.equal(alias.asaas_customer_id, "asaas-new");

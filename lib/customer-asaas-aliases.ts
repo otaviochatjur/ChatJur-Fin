@@ -10,10 +10,11 @@ export type StoredAsaasCustomer = {
   responsible_name: string | null;
   email: string | null;
   phone: string | null;
+  signed_at: string | null;
   status: "ACTIVE" | "CANCELLED" | "FROZEN" | null;
 };
 
-const CUSTOMER_SELECT = "id,asaas_customer_id,external_office_id,acquisition_actor_id,office_name,responsible_name,email,phone,status";
+const CUSTOMER_SELECT = "id,asaas_customer_id,external_office_id,acquisition_actor_id,office_name,responsible_name,email,phone,signed_at,status";
 const exclusionCache = new Map<string, { expiresAt: number; ids: Set<string> }>();
 
 export async function excludedAsaasCustomerIds(asaasCustomerIds: string[]) {

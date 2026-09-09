@@ -17,6 +17,7 @@ import { ColumnVisibilityMenu, ResizableTh, useTableSort, useColumnVisibility, u
 import { isPaidStatus, money, monthlyValue, planBadgeClass, planKindLabels, roleLabels, type CommercialActor, type Customer, type ImplementationPayment, type Payment, type PaymentLink, type Plan, type Subscription } from "@/lib/metrics";
 import { currentLinkedSubscriptions } from "@/lib/subscription-presentation";
 import { localDate } from "@/lib/customer-activity";
+import type { ClientSheetSyncResult } from "@/lib/client-sheet-sync";
 
 const clientColumns: ColumnDef<"status" | "plan" | "mrr" | "actor" | "signedAt">[] = [
   { key: "status", label: "Status", defaultWidth: 120 },
@@ -97,6 +98,9 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
   const [actorFilter, setActorFilter] = useState<string>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [syncingAll, setSyncingAll] = useState(false);
+  const [syncingClients, setSyncingClients] = useState(false);
+  const [sheetSyncResult, setSheetSyncResult] = useState<ClientSheetSyncResult | null>(null);
+  const [showSheetSyncResult, setShowSheetSyncResult] = useState(false);
   const [lastSync, setLastSync] = useState<PaymentSyncRun | null>(null);
   const columns = useColumnVisibility(clientColumns);
   const widths = useColumnWidths(clientColumns);
@@ -178,6 +182,24 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
     }
   }
 
+  async function syncClients() {
+    setSyncingClients(true);
+    try {
+      const response = await fetch("/api/customers/sync-sheet", { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) { toast.error(data.error ?? "Não foi possível sincronizar a Base de Clientes."); return; }
+      const result = data as ClientSheetSyncResult;
+      setSheetSyncResult(result);
+      setShowSheetSyncResult(true);
+      const pending = result.systemOnlyEmails.length + result.skippedWithoutSignedAt.length + result.duplicateSheetEmails.length + result.duplicateSystemEmails.length + result.officeIdConflicts.length;
+      if (pending) toast.warning(`Base atualizada com ${pending} pendência(s) para revisar.`);
+      else toast.success(`Base atualizada: ${result.created} cliente(s) incluído(s) e ${result.updated} atualizado(s).`);
+      onChanged();
+    } finally {
+      setSyncingClients(false);
+    }
+  }
+
   return (
     <div className="space-y-5">
       <section className="rounded-2xl border border-slate-200 dark:border-border bg-white dark:bg-card shadow-[0_10px_30px_rgba(15,23,42,0.04)]">
@@ -187,7 +209,10 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
             <p className="mt-1 text-sm text-slate-500 dark:text-muted-foreground">Novos clientes só entram se já constarem na aba ⭐ Base de Clientes do Google Sheets</p>
           </div>
           <div className="flex flex-col items-end gap-1">
-            <Button variant="outline" size="sm" disabled={syncingAll} onClick={syncAllPayments}>{syncingAll ? "Sincronizando…" : "Sincronizar pagamentos"}</Button>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="outline" size="sm" disabled={syncingClients} onClick={syncClients}>{syncingClients ? "Atualizando clientes…" : "Sincronizar Base de Clientes"}</Button>
+              <Button variant="outline" size="sm" disabled={syncingAll} onClick={syncAllPayments}>{syncingAll ? "Sincronizando…" : "Sincronizar pagamentos"}</Button>
+            </div>
             {lastSync && (
               lastSync.action === "FAILED" ? (
                 <p className="text-xs text-red-600 dark:text-red-300" title={lastSync.after_json?.error ?? ""}>Última sincronização falhou em {fmtDateTime(lastSync.created_at)}</p>
@@ -260,9 +285,38 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
           </TableBody>
         </Table>
       </section>
+      <Dialog open={showSheetSyncResult} onOpenChange={setShowSheetSyncResult}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Resultado da Base de Clientes</DialogTitle>
+            <DialogDescription>Os cadastros foram reconciliados por e-mail. Status, planos, pagamentos e históricos foram preservados.</DialogDescription>
+          </DialogHeader>
+          {sheetSyncResult && <div className="space-y-4 text-sm">
+            <div className="grid grid-cols-3 gap-2">
+              <div className="rounded-xl bg-emerald-50 p-3 dark:bg-emerald-950/40"><p className="text-xs text-emerald-700 dark:text-emerald-300">Incluídos</p><p className="mt-1 text-xl font-semibold">{sheetSyncResult.created}</p></div>
+              <div className="rounded-xl bg-blue-50 p-3 dark:bg-blue-950/40"><p className="text-xs text-blue-700 dark:text-blue-300">Atualizados</p><p className="mt-1 text-xl font-semibold">{sheetSyncResult.updated}</p></div>
+              <div className="rounded-xl bg-slate-50 p-3 dark:bg-muted"><p className="text-xs text-slate-500 dark:text-muted-foreground">Sem alteração</p><p className="mt-1 text-xl font-semibold">{sheetSyncResult.unchanged}</p></div>
+            </div>
+            {sheetSyncResult.systemOnlyEmails.length > 0 && <SyncIssue title={`No sistema, mas fora da Base de Clientes (${sheetSyncResult.systemOnlyEmails.length})`} items={sheetSyncResult.systemOnlyEmails} />}
+            {sheetSyncResult.skippedWithoutSignedAt.length > 0 && <SyncIssue title={`Sem data “Assinado em” (${sheetSyncResult.skippedWithoutSignedAt.length})`} items={sheetSyncResult.skippedWithoutSignedAt} tone="danger" />}
+            {sheetSyncResult.duplicateSheetEmails.length > 0 && <SyncIssue title="E-mails repetidos na Base de Clientes" items={sheetSyncResult.duplicateSheetEmails} tone="danger" />}
+            {sheetSyncResult.duplicateSystemEmails.length > 0 && <SyncIssue title="E-mails repetidos no sistema" items={sheetSyncResult.duplicateSystemEmails} tone="danger" />}
+            {sheetSyncResult.duplicateOfficeIds.length > 0 && <SyncIssue title="Números de cliente repetidos na Base" items={sheetSyncResult.duplicateOfficeIds} tone="danger" />}
+            {sheetSyncResult.officeIdConflicts.length > 0 && <SyncIssue title="Conflitos no número do cliente" items={sheetSyncResult.officeIdConflicts} tone="danger" />}
+            {sheetSyncResult.ignoredWithoutEmail > 0 && <p className="rounded-xl bg-amber-50 p-3 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">{sheetSyncResult.ignoredWithoutEmail} linha(s) sem e-mail foram ignoradas.</p>}
+          </div>}
+        </DialogContent>
+      </Dialog>
       <ClientDialog customerId={selectedId} customers={customers} subscriptions={subscriptions} payments={payments} implementationPayments={implementationPayments} plans={plans} actors={actors} links={links} events={events} onChanged={onChanged} onOpenChange={open => { if (!open) setSelectedId(null); }} />
     </div>
   );
+}
+
+function SyncIssue({ title, items, tone = "warning" }: { title: string; items: string[]; tone?: "warning" | "danger" }) {
+  return <div className={`rounded-xl p-3 ${tone === "danger" ? "bg-red-50 text-red-900 dark:bg-red-950/40 dark:text-red-200" : "bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200"}`}>
+    <p className="font-medium">{title}</p>
+    <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto text-xs">{items.map(item => <li key={item}>{item}</li>)}</ul>
+  </div>;
 }
 
 export function ClientDialog({ customerId, customers, subscriptions, payments, implementationPayments, plans, actors, links, events, onChanged, onOpenChange }: {

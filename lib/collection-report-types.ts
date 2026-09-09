@@ -20,4 +20,6 @@ export type ReportRow = {
   internal_customer_id?: string | null;
   customer_found?: boolean;
   customer_status?: "ACTIVE" | "CANCELLED" | "FROZEN" | null;
+  sent_today_at?: string | null;
+  sent_today_stage?: string | null;
 };

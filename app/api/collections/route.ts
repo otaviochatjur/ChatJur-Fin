@@ -1,5 +1,5 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
-import { dispatchCollection } from "@/lib/collection-dispatch";
+import { CollectionDispatchError, dispatchCollection } from "@/lib/collection-dispatch";
 import { freshCollectionPreview } from "@/lib/collection-preview-server";
 import { readCollectionSettings } from "@/lib/collection-settings-server";
 import { collectionToday, type BillingTemplate, type CollectionPreview } from "@/lib/collection-policy";
@@ -89,6 +89,6 @@ export async function POST(request: Request) {
     const result = await dispatchCollection(row, today);
     return Response.json({ ok: true, skipped: result.skipped });
   } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : "Não foi possível enviar." }, { status: 400 });
+    return Response.json({ error: error instanceof Error ? error.message : "Não foi possível enviar.", continueBatch: error instanceof CollectionDispatchError ? error.continueBatch : false, retryAfterMs: error instanceof CollectionDispatchError ? error.retryAfterMs : undefined }, { status: error instanceof CollectionDispatchError && error.retryAfterMs ? 429 : 400 });
   }
 }

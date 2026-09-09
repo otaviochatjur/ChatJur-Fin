@@ -1,8 +1,11 @@
 import { createHash } from 'node:crypto';
 import { currentTenant } from './tenant-server';
 import { supabaseRequest } from './supabase-server';
-import { chatRequest, openChatConversation, requireConnectedChatInstance, sameChatPhone } from './chat-juridico-server';
+import { ChatRequestError, chatRequest, openChatConversation, requireConnectedChatInstance, sameChatPhone } from './chat-juridico-server';
 import { type BillingContact, type CollectionPreview } from './collection-policy';
+export class CollectionDispatchError extends Error {
+  constructor(message: string, public continueBatch: boolean, public retryAfterMs?: number) { super(message); }
+}
 /** Shared atomic claim: manual and scheduled execution cannot repeat the same payment/day/stage. */
 export async function dispatchCollection(row: CollectionPreview, today: string) {
   if (row.blocked || !row.stage) throw new Error('Cobrança não apta para envio.');
@@ -32,13 +35,15 @@ export async function dispatchCollection(row: CollectionPreview, today: string) 
     messageRequested = true;
     await chatRequest(`/v1/conversations/${encodeURIComponent(conversation.id)}/messages`, { method: "POST", idempotencyKey: `collection-${id}`, body: { type: "template", instance_id: row.instance_id, template: { name: row.stage, language: row.language, parameters: row.parameters } } });
     phase = 'audit';
-    await supabaseRequest(`/rest/v1/audit_events?id=eq.${id}`, { method: "PATCH", body: { action: "SENT" } });
+    await supabaseRequest(`/rest/v1/audit_events?id=eq.${id}`, { method: "PATCH", body: { action: "SENT", after_json: { ...row, date: today, sent_at: new Date().toISOString() } } });
     return { skipped: false };
   } catch (error) {
     if (attemptId) {
       const detail = error instanceof Error ? error.message : 'Falha desconhecida.';
-      await supabaseRequest(`/rest/v1/audit_events?id=eq.${attemptId}`, { method: 'PATCH', body: { action: messageRequested ? 'REVIEW_REQUIRED' : 'FAILED', after_json: { ...row, date: today, error: detail, failure_phase: phase } } }).catch(() => null);
+      const confirmedRejection = messageRequested && error instanceof ChatRequestError && error.status >= 400 && error.status < 500;
+      await supabaseRequest(`/rest/v1/audit_events?id=eq.${attemptId}`, { method: 'PATCH', body: { action: messageRequested && !confirmedRejection ? 'REVIEW_REQUIRED' : 'FAILED', after_json: { ...row, date: today, error: detail, failure_phase: phase } } }).catch(() => null);
       if (!messageRequested) throw new Error(`Mensagem não enviada: ${detail}`);
+      if (confirmedRejection) throw new CollectionDispatchError(`Mensagem não enviada: ${detail}`, true, error.retryAfterMs);
       throw new Error('Resultado do envio incerto. Confira o histórico e a conversa antes de continuar.');
     }
     throw error;

@@ -25,6 +25,44 @@ export function canonicalBillingPayment(p: BillingPayment & { asaas_id?: string 
   return { id: p.id, asaas_payment_id: p.asaas_payment_id ?? p.asaas_id ?? null, contact_id: p.contact_id ?? null, contact_name: p.contact_name ?? null, chat_id: p.chat_id ?? null, due_date: p.due_date ?? null, value: Number(p.value), status: p.status, invoice_url: p.invoice_url ?? null };
 }
 export type BillingTemplate = { name: string; language: string; status: string; instance_id: string; components: { type: string; text?: string; format?: string; buttons?: unknown[] }[] };
+type CollectionParameterKind = "name" | "due_date" | "invoice_url";
+const COLLECTION_PARAMETER_OVERRIDES: Record<string, CollectionParameterKind[]> = {
+  cobranca_d_menos_5: ["name", "due_date", "invoice_url"],
+  cobranca_d_menos_3: ["name", "invoice_url"],
+  cobranca_d0: ["name", "due_date", "invoice_url"],
+  cobranca_d_00: ["name", "due_date", "invoice_url"],
+  cobranca_d_000: ["name", "due_date", "invoice_url"],
+  cobranca_d_mais_1: ["name", "due_date", "invoice_url"],
+  cobranca_d_mais_01: ["name", "due_date", "invoice_url"],
+  cobranca_d_mais_2: ["name", "invoice_url"],
+  cobranca_d_mais_02: ["name", "invoice_url"],
+  cobranca_d_mais_002: ["name", "invoice_url"],
+  cobranca_d_mais_5: ["name", "invoice_url"],
+  cobranca_d_mais_10: ["name", "due_date", "invoice_url"],
+  cobranca_d_mais_20: ["name", "invoice_url"],
+  cobranca_d_mais_25: ["name", "invoice_url"],
+  cobranca_d_mais_025: ["name", "invoice_url"],
+  cobranca_d_mais_30_cancelamento: ["name"],
+};
+function inferredParameterKind(text: string, index: string): CollectionParameterKind | null {
+  if (index === "1") return "name";
+  const marker = new RegExp(`\\{\\{\\s*${index}\\s*\\}\\}`);
+  const position = text.search(marker);
+  if (position < 0) return null;
+  const keywords: [CollectionParameterKind, RegExp][] = [
+    ["due_date", /venc(?:e|imento)|data/gi],
+    ["invoice_url", /link|acesse|acessar|regulariz|fatura\s+atrav[eé]s/gi],
+  ];
+  let best: { kind: CollectionParameterKind; distance: number } | null = null;
+  for (const [kind, pattern] of keywords) for (const match of text.matchAll(pattern)) {
+    const distance = Math.abs((match.index ?? 0) - position);
+    if (!best || distance < best.distance) best = { kind, distance };
+  }
+  return best?.kind ?? null;
+}
+export function collectionTemplateParameterKind(templateName: string, text: string, index: string) {
+  return COLLECTION_PARAMETER_OVERRIDES[templateName]?.[Number(index) - 1] ?? inferredParameterKind(text, index);
+}
 export function collectionTemplateCanPreview(template: BillingTemplate) {
   if (template.status !== "APPROVED" || template.language !== "pt_BR" || !Array.isArray(template.components)) return false;
   let hasText = false;
@@ -54,7 +92,7 @@ export function previewCollection(payment: BillingPayment, contact: BillingConta
   const template = templates.find(t => t.name === stage && t.status === "APPROVED" && t.instance_id === senderInstanceId && t.language === "pt_BR");
   if (row.blocked) return row;
   if (!template) return { ...row, blocked: "Template aprovado não encontrado no número escolhido" };
-  const values: Record<string, string> = { "1": contact?.name ?? payment.contact_name ?? "", "2": payment.due_date?.split("-").reverse().join("/") ?? "", "3": payment.invoice_url ?? "" };
+  const values: Record<CollectionParameterKind, string> = { name: contact?.name ?? payment.contact_name ?? "", due_date: payment.due_date?.split("-").reverse().join("/") ?? "", invoice_url: payment.invoice_url ?? "" };
   const texts: string[] = [];
   for (const component of template.components) {
     const kind = component.type.toLowerCase();
@@ -63,8 +101,10 @@ export function previewCollection(payment: BillingPayment, contact: BillingConta
     const text = component.text ?? "";
     let missing = false;
     const rendered = text.replace(/\{\{\s*(\d+)\s*\}\}/g, (_, index: string) => {
-      if (!values[index] || (kind !== "body")) { missing = true; return ""; }
-      row.parameters[`body_${index}`] = values[index]; return values[index];
+      const parameterKind = collectionTemplateParameterKind(template.name, text, index);
+      const value = parameterKind ? values[parameterKind] : "";
+      if (!value || (kind !== "body")) { missing = true; return ""; }
+      row.parameters[`body_${index}`] = value; return value;
     });
     if (missing || rendered.includes("{{")) return { ...row, blocked: "Variáveis do template precisam de revisão" };
     texts.push(rendered);
