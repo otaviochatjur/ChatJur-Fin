@@ -39,6 +39,7 @@ test('ALL reads 100 per page, reuses customers and counts IDs without rereading 
     }
     const table=url.pathname.split('/').at(-1);
     if(table==='nexo_integrations')return Response.json([]);
+    if(table==='asaas_customer_exclusions')return Response.json([]);
     if(table==='collection_reports'){
       if(options.method==='PATCH')report={...report,...JSON.parse(options.body)};
       return Response.json([report]);

@@ -120,6 +120,7 @@ test('scheduled worker rechecks Asaas and skips a payment settled after the queu
     if (table === 'nexo_integrations') return Response.json(url.searchParams.get('provider') === 'eq.chat-juridico' ? [{ encrypted_key: encrypted, tenant_id: 'tenant' }] : []);
     if (table === 'collection_schedule') return Response.json([{ config: { enabled: true, time: '00:00', saturday: true, sunday: true, holidays: true, instanceId: FINANCIAL_INSTANCE } }]);
     if (table === 'collection_settings') return Response.json([]);
+    if (table === 'asaas_customer_exclusions') return Response.json([]);
     if (table === 'customers') return Response.json([{ id: 'customer', asaas_customer_id: 'cus', status: 'ACTIVE', phone: '11999999999', responsible_name: 'Ana', office_name: 'Ana' }]);
     assert.equal(table, 'collection_schedule_jobs');
     if (options.method === 'PATCH' && url.searchParams.has('lease_until')) return Response.json([{ payment_ids: ['chatpay'], cursor: 0, sent: 0, skipped: 0 }]);

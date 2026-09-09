@@ -6,7 +6,7 @@ import { CollectionKanban } from "./collection-kanban";
 import { CollectionHistory } from "./collection-history";
 import { CollectionReports } from "./collection-reports";
 import type { CollectionReport, ReportRow } from "@/lib/collection-report-types";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { money, type Customer, type Payment } from "@/lib/metrics";
 import { type CollectionPreview } from "@/lib/collection-policy";
@@ -88,14 +88,17 @@ export function CollectionsSection({ payments }: { payments: Payment[]; customer
     } catch (e) { setError(e instanceof Error ? e.message : "Não foi possível exportar."); }
     finally { setBusy(false); }
   }
+  const handleReportSelect = useCallback((selectedReport: CollectionReport, _saved: CollectionPreview[], data: ReportRow[]) => {
+    setReport(selectedReport); setReportData(data); setRows(null); setResults({}); setSelected(new Set()); setProgress(null);
+  }, []);
   const eligible = rows?.filter(row => !row.blocked) ?? [];
   const selectable = eligible.filter(row => row.approval && !results[row.payment.id]);
   const selectedCount = selectedCollectionPreviews(rows ?? [], selected, results).length;
   const blocked = rows?.filter(row => row.blocked) ?? [];
   return <div className="space-y-6">
-    <nav className="flex flex-wrap gap-2">{[["reports","Relatórios"],["kanban","Kanban"],["rules","Configurar régua"],["history","Histórico"],["schedule","Programação"]].map(([id,label])=><Button key={id} disabled={busy} variant={view===id?"default":"outline"} onClick={()=>setView(id)}>{label}</Button>)}</nav>
+    <nav className="flex flex-wrap gap-2">{[["reports","Régua do dia"],["kanban","Kanban"],["rules","Configurar régua"],["history","Histórico"],["schedule","Programação"]].map(([id,label])=><Button key={id} disabled={busy} variant={view===id?"default":"outline"} onClick={()=>setView(id)}>{label}</Button>)}</nav>
     {view==="reports"&&<section className="rounded-2xl border bg-card p-5 sm:p-6"><div className="flex flex-wrap items-end justify-between gap-4"><div><h2 className="text-lg font-semibold">Número para os disparos</h2><p className="mt-1 text-sm text-muted-foreground">O número Financeiro já fica selecionado. A régua e os templates abaixo usam este remetente.</p></div><label className="min-w-72 text-sm">Enviar pelo número<select aria-label="Número remetente do Chat Jurídico" className="mt-1 block h-10 w-full rounded-md border bg-card px-3" value={senderId} disabled={busy} onChange={event => { setSenderId(event.target.value); setRows(null); setResults({}); setSelected(new Set()); }}><option value="">Escolha um número conectado</option>{instances.map(instance => <option key={instance.id} value={instance.id}>{instance.name || "WhatsApp"} · {instance.display_phone_number || instance.phone_id || instance.id} · {instance.approved_template_count ?? 0} templates</option>)}</select></label></div>{instanceError && <p role="alert" className="mt-3 text-sm text-destructive">{instanceError}</p>}</section>}
-    <fieldset disabled={busy} hidden={view!=="reports"}><CollectionReports canGenerate={Boolean(senderId)} approvedTemplates={approvedTemplates} selectedPayments={selected} onSelectionChange={setSelected} onSelect={(selected, _saved, data) => { setReport(selected); setReportData(data); setRows(null); setResults({}); setSelected(new Set()); setProgress(null); }} /></fieldset>
+    <fieldset disabled={busy} hidden={view!=="reports"}><CollectionReports approvedTemplates={approvedTemplates} selectedPayments={selected} onSelectionChange={setSelected} onSelect={handleReportSelect} /></fieldset>
     {view==="kanban"&&<CollectionKanban rows={reportData}/>}
     {view==="rules"&&<CollectionRuleEditor customers={reportData}/>}
     {view==="history"&&<CollectionHistory/>}

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -15,7 +15,7 @@ async function reportRequest(body?: unknown, query = "") {
   const r = await fetch(`/api/collections/reports${query}`, { ...(body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(120000) });
   const data = await r.json(); if (!r.ok) throw new Error(data.error ?? "Não foi possível consultar o relatório."); return data;
 }
-export function CollectionReports({ onSelect, selectedPayments, onSelectionChange, approvedTemplates, canGenerate }: { canGenerate: boolean; approvedTemplates: string[]; selectedPayments: Set<string>; onSelectionChange: (ids: Set<string>) => void; onSelect: (report: CollectionReport, savedPreviews: CollectionPreview[], rows: ReportRow[]) => void }) {
+export function CollectionReports({ onSelect, selectedPayments, onSelectionChange, approvedTemplates }: { approvedTemplates: string[]; selectedPayments: Set<string>; onSelectionChange: (ids: Set<string>) => void; onSelect: (report: CollectionReport, savedPreviews: CollectionPreview[], rows: ReportRow[]) => void }) {
   const sorting = useTableSort(), widths = useColumnWidths();
   const [reports, setReports] = useState<CollectionReport[]>([]);
   const [mode, setMode] = useState<ReportMode>("OPEN");
@@ -26,31 +26,13 @@ export function CollectionReports({ onSelect, selectedPayments, onSelectionChang
   const [search, setSearch] = useState(""), [page, setPage] = useState(0);
   const [detail, setDetail] = useState<ReportRow | null>(null);
   const stopped = useRef(false), running = useRef(false);
-  const onSelectRef = useRef(onSelect);
-  onSelectRef.current = onSelect;
-  useEffect(() => {
-    stopped.current = false;
-    reportRequest().then(async data => {
-      if (stopped.current) return;
-      setReports(data.reports);
-      const today = collectionToday();
-      const current = data.reports.find((report: CollectionReport) => report.mode === "DAILY" && report.report_date === today);
-      if (current) {
-        const opened = await reportRequest(undefined, `?id=${current.id}`);
-        if (stopped.current) return;
-        setSelected(opened.report); setRows(opened.rows); setPage(0); setSearch(""); setDetail(null);
-        onSelectRef.current(opened.report, opened.review?.rows ?? [], opened.rows);
-      }
-    }).catch(e => { if (!stopped.current) setError(e.message); });
-    return () => { stopped.current = true; };
-  }, []);
-  async function open(id: string) {
+  const open = useCallback(async (id: string) => {
     const data = await reportRequest(undefined, `?id=${id}`);
     if (stopped.current) return;
     setSelected(data.report); setRows(data.rows); setPage(0); setSearch(""); setDetail(null);
-    onSelectRef.current(data.report, data.review?.rows ?? [], data.rows);
-  }
-  async function generate(existing?: CollectionReport, requestedMode: ReportMode = "DAILY") {
+    onSelect(data.report, data.review?.rows ?? [], data.rows);
+  }, [onSelect]);
+  const generate = useCallback(async (existing?: CollectionReport, requestedMode: ReportMode = "DAILY") => {
     if (running.current) return;
     running.current = true; setBusy(true); setError(""); setRows([]); setDetail(null);
     try {
@@ -63,11 +45,20 @@ export function CollectionReports({ onSelect, selectedPayments, onSelectionChang
       if (!stopped.current) { await open(report.id); setReports((await reportRequest()).reports); }
     } catch (e) {
       if (!stopped.current) {
-        setError((e instanceof Error ? e.message : "Falha na geração.") + " O progresso já salvo pode ser retomado.");
+        setError(e instanceof Error ? e.message : "Não foi possível atualizar a régua.");
         try { setReports((await reportRequest()).reports); } catch { /* retain current report */ }
       }
     } finally { running.current = false; if (!stopped.current) setBusy(false); }
-  }
+  }, [onSelect, open]);
+  useEffect(() => {
+    stopped.current = false;
+    reportRequest().then(async data => {
+      if (stopped.current) return;
+      setReports(data.reports);
+      await generate(undefined, "DAILY");
+    }).catch(e => { if (!stopped.current) setError(e.message); });
+    return () => { stopped.current = true; };
+  }, [generate]);
   async function exportReport() {
     if (!selected) return;
     const XLSX = await import("xlsx"); const book = XLSX.utils.book_new();
@@ -98,10 +89,9 @@ export function CollectionReports({ onSelect, selectedPayments, onSelectionChang
   const exceptionReports = reports.filter(report => report.mode !== "DAILY");
   const showingDaily = selected?.mode === "DAILY" && selected.report_date === today;
   return <section className="space-y-5 rounded-2xl border bg-card p-5 sm:p-6">
-    <div className="flex flex-wrap items-start justify-between gap-4"><div><h2 className="text-lg font-semibold">Régua de hoje · {today.split("-").reverse().join("/")}</h2><p className="mt-1 text-sm text-muted-foreground">Ao abrir esta tela, a última régua completa do dia é carregada automaticamente.</p></div><Button disabled={busy || !canGenerate} onClick={() => void generate(currentDaily?.status === "RUNNING" ? currentDaily : undefined, "DAILY")}>{busy ? "Gerando e conferindo…" : currentDaily ? "Atualizar régua de hoje" : "Gerar régua de hoje"}</Button></div>
-    {!canGenerate && <p className="text-sm text-amber-700 dark:text-amber-300">Selecione um número conectado acima para gerar e validar a régua.</p>}
-    {!currentDaily && !busy && <p className="rounded-xl bg-muted/40 p-4 text-sm text-muted-foreground">A régua de hoje ainda não foi gerada.</p>}
-    <div className="rounded-xl border border-dashed p-4"><Button variant="ghost" size="sm" onClick={() => setShowExceptions(value => !value)}>{showExceptions ? "Fechar relatórios excepcionais" : "Relatórios excepcionais"}</Button>{showExceptions && <div className="mt-4 space-y-3"><p className="text-sm text-muted-foreground">Use apenas quando precisar consultar cobranças fora das etapas previstas para hoje.</p><div className="flex flex-wrap items-end gap-3"><label className="min-w-56 text-sm">Consulta<select className="mt-1 block h-10 w-full rounded-md border bg-card px-3" disabled={busy} value={mode} onChange={e => setMode(e.target.value as ReportMode)}><option value="OPEN">Vencidas e a vencer</option><option value="ALL">Todas as cobranças</option></select></label><Button variant="outline" disabled={busy || !canGenerate} onClick={() => void generate(undefined, mode)}>{busy ? "Gerando…" : "Gerar consulta excepcional"}</Button></div>{!!exceptionReports.length && <label className="block text-sm">Consultas excepcionais recentes<select disabled={busy} className="mt-1 h-10 w-full rounded-md border bg-card px-3" value={selected?.mode !== "DAILY" ? selected?.id ?? "" : ""} onChange={e => { if (e.target.value) void open(e.target.value).catch(error => setError(error.message)); }}><option value="">Selecione uma consulta</option>{exceptionReports.map(report => <option key={report.id} value={report.id}>{new Date(report.created_at).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })} · {reportModeLabels[report.mode]} · {report.status === "COMPLETE" ? `${report.row_count} registros` : "Pode retomar"}</option>)}</select></label>}{!showingDaily && currentDaily && <Button variant="ghost" size="sm" onClick={() => void open(currentDaily.id).catch(error => setError(error.message))}>Voltar para a régua de hoje</Button>}</div>}</div>
+    <div className="flex flex-wrap items-start justify-between gap-4"><div><h2 className="text-lg font-semibold">Régua de hoje · {today.split("-").reverse().join("/")}</h2><p className="mt-1 text-sm text-muted-foreground">Calculada automaticamente com a Base do Asaas já sincronizada.</p></div><Button variant="outline" disabled={busy} onClick={() => void generate(undefined, "DAILY")}>{busy ? "Atualizando pela base…" : "Recalcular pela base"}</Button></div>
+    {!currentDaily && busy && <p className="rounded-xl bg-muted/40 p-4 text-sm text-muted-foreground">Preparando a régua de hoje com os dados já salvos.</p>}
+    <div className="rounded-xl border border-dashed p-4"><Button variant="ghost" size="sm" onClick={() => setShowExceptions(value => !value)}>{showExceptions ? "Fechar relatórios excepcionais" : "Relatórios excepcionais"}</Button>{showExceptions && <div className="mt-4 space-y-3"><p className="text-sm text-muted-foreground">Use apenas quando precisar consultar cobranças fora das etapas previstas para hoje.</p><div className="flex flex-wrap items-end gap-3"><label className="min-w-56 text-sm">Consulta<select className="mt-1 block h-10 w-full rounded-md border bg-card px-3" disabled={busy} value={mode} onChange={e => setMode(e.target.value as ReportMode)}><option value="OPEN">Vencidas e a vencer</option><option value="ALL">Todas as cobranças</option></select></label><Button variant="outline" disabled={busy} onClick={() => void generate(undefined, mode)}>{busy ? "Consultando a base…" : "Abrir consulta excepcional"}</Button></div>{!!exceptionReports.length && <label className="block text-sm">Consultas excepcionais recentes<select disabled={busy} className="mt-1 h-10 w-full rounded-md border bg-card px-3" value={selected?.mode !== "DAILY" ? selected?.id ?? "" : ""} onChange={e => { if (e.target.value) void open(e.target.value).catch(error => setError(error.message)); }}><option value="">Selecione uma consulta</option>{exceptionReports.map(report => <option key={report.id} value={report.id}>{new Date(report.created_at).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })} · {reportModeLabels[report.mode]} · {report.status === "COMPLETE" ? `${report.row_count} registros` : "Pode retomar"}</option>)}</select></label>}{!showingDaily && currentDaily && <Button variant="ghost" size="sm" onClick={() => void open(currentDaily.id).catch(error => setError(error.message))}>Voltar para a régua de hoje</Button>}</div>}</div>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {selected && <>
       <div role="status" className="rounded-xl bg-muted/50 p-4 text-sm"><p className="font-medium">{reportModeLabels[selected.mode]} · {selected.report_date.split("-").reverse().join("/")}</p><p className="mt-1">{selected.status === "COMPLETE" ? "Completo" : "Em geração"} · gerado em {new Date(selected.created_at).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })} · {selected.processed} cobranças conferidas · {selected.row_count} registros</p>{selected.completed_at && <p className="mt-1 text-xs text-muted-foreground">Conferência concluída em {new Date(selected.completed_at).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}.</p>}{selected.source_generation && <p className="mt-1">Origem: base sincronizada · Atualizada em {selected.source_updated_at ? new Date(selected.source_updated_at).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" }) : "—"}</p>}{!isCollectionBusinessDay(selected.report_date) && <p className="mt-1">Fim de semana ou feriado nacional: não há disparo da régua nesta data.</p>}{selected.status !== "COMPLETE" && !busy && <Button className="mt-3" onClick={() => void generate(selected, selected.mode)}>Retomar geração</Button>}</div>

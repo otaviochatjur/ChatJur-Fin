@@ -23,12 +23,26 @@ async function sourceReader() {
 }
 const customerCache = new ReportCustomerCache<AsaasCustomer>();
 export async function createCollectionReport(mode: ReportMode) {
-  const base = mode === "ALL" ? await readAsaasBaseState() : null;
-  if (mode === "ALL" && !base?.active_generation) throw new Error("Sincronize a base do Asaas antes de gerar Todas as cobranças.");
-  if (mode !== "ALL") await sourceReader();
+  const base = await readAsaasBaseState();
+  if (!base?.active_generation) throw new Error("Sincronize a Base do Asaas antes de abrir a régua de cobrança.");
   const ruleConfig = await readCollectionSettings();
   const today = collectionToday(); const empty = mode === "DAILY" && !isCollectionBusinessDay(today);
-  const [report] = await supabaseRequest<CollectionReport[]>("/rest/v1/collection_reports", { method: "POST", prefer: "return=representation", body: { mode, source_generation: base?.active_generation ?? null, source_updated_at: base?.last_event_at && base.last_event_at > (base.completed_at ?? "") ? base.last_event_at : base?.completed_at ?? null, rule_config: ruleConfig, report_date: today, status: empty ? "COMPLETE" : "RUNNING", completed_at: empty ? new Date().toISOString() : null } });
+  const sourceUpdatedAt = base.last_event_at && base.last_event_at > (base.completed_at ?? "") ? base.last_event_at : base.completed_at ?? null;
+  const input = { source_generation: base.active_generation, source_updated_at: sourceUpdatedAt, rule_config: ruleConfig };
+  if (mode === "DAILY") {
+    const [existing] = await supabaseRequest<CollectionReport[]>(`/rest/v1/collection_reports?mode=eq.DAILY&report_date=eq.${today}&select=*&order=created_at.desc&limit=1`);
+    if (existing) {
+      const current = existing.source_generation === input.source_generation
+        && existing.source_updated_at === input.source_updated_at
+        && JSON.stringify(existing.rule_config) === JSON.stringify(input.rule_config);
+      if (current) return existing;
+      await supabaseRequest(`/rest/v1/collection_report_rows?report_id=eq.${existing.id}`, { method: "DELETE" });
+      await supabaseRequest(`/rest/v1/audit_events?entity_type=eq.collection_review&entity_id=eq.${existing.id}`, { method: "DELETE" });
+      const [reset] = await supabaseRequest<CollectionReport[]>(`/rest/v1/collection_reports?id=eq.${existing.id}`, { method: "PATCH", prefer: "return=representation", body: { ...input, status: empty ? "COMPLETE" : "RUNNING", phase: 0, page_offset: 0, source_cursor: null, processed: 0, row_count: 0, error: null, created_at: new Date().toISOString(), completed_at: empty ? new Date().toISOString() : null } });
+      if (reset) return reset;
+    }
+  }
+  const [report] = await supabaseRequest<CollectionReport[]>("/rest/v1/collection_reports", { method: "POST", prefer: "return=representation", body: { mode, ...input, report_date: today, status: empty ? "COMPLETE" : "RUNNING", completed_at: empty ? new Date().toISOString() : null } });
   return report;
 }
 export async function readCollectionReport(id: string) {

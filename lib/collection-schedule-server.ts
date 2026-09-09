@@ -20,7 +20,7 @@ async function queueForToday(config: CollectionScheduleConfig, today: string) {
   const settings = await readCollectionSettings();
   const eligible = new Set<string>();
   for (let offset = 0; ; offset += 1000) {
-    const rows = await supabaseRequest<{ external_id: string; payload: AsaasPayment }[]>(`/rest/v1/asaas_base_payments?select=external_id,payload&generation=eq.${state.active_generation}&order=external_id&limit=1000&offset=${offset}`);
+    const rows = await supabaseRequest<{ external_id: string; payload: AsaasPayment }[]>(`/rest/v1/asaas_base_payments?select=external_id,payload&generation=eq.${state.active_generation}&payload->>status=in.(PENDING,OVERDUE)&order=external_id&limit=1000&offset=${offset}`);
     for (const row of rows) if (['PENDING','OVERDUE'].includes(row.payload.status) && collectionSchedule(row.payload.dueDate ?? null, today, rulesForCustomer(settings, row.payload.customer), config).stage) eligible.add(row.external_id);
     if (rows.length < 1000) break;
   }
