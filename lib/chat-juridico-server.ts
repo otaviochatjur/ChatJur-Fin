@@ -1,6 +1,7 @@
 import { readIntegrationKey } from "./integrations-server";
 
 export type ChatInstance = { id: string; name: string | null; phone_id: string | null; display_phone_number: string | null; is_connected: boolean; api_provider?: string | null; approved_template_count?: number; approved_template_names?: string[] };
+export type ChatConversation = { id: string; instance_id: string; contact_id: string; phone?: string | null };
 export class ChatRequestError extends Error {
   constructor(message: string, public status: number, public code?: string, public details?: Record<string, unknown>) { super(message); }
 }
@@ -34,12 +35,41 @@ export async function requireConnectedChatInstance(instanceId: string) {
   return instance;
 }
 
+export function chatPhoneVariants(value: string) {
+  const phone = value.replace(/\D/g, "");
+  const variants = new Set([phone]);
+  if (phone.startsWith("55") && phone.length === 13 && phone[4] === "9") variants.add(`${phone.slice(0, 4)}${phone.slice(5)}`);
+  if (phone.startsWith("55") && phone.length === 12) variants.add(`${phone.slice(0, 4)}9${phone.slice(4)}`);
+  return [...variants].filter(Boolean);
+}
+
+export function sameChatPhone(left: string | null | undefined, right: string | null | undefined) {
+  if (!left || !right) return false;
+  const rightVariants = new Set(chatPhoneVariants(right));
+  return chatPhoneVariants(left).some(value => rightVariants.has(value));
+}
+
+async function contactsForPhone<T extends { id: string; phone: string | null }>(phone: string) {
+  const pages = await Promise.all(chatPhoneVariants(phone).map(value => chatList<T>(`/v1/contacts?phone=${encodeURIComponent(value)}&is_active=true`)));
+  const unique = new Map<string, T>();
+  for (const contact of pages.flat()) if (sameChatPhone(contact.phone, phone)) unique.set(contact.id, contact);
+  return [...unique.values()];
+}
+
+export async function conversationForChatInstance(phone: string, instanceId: string) {
+  const pages = await Promise.all(chatPhoneVariants(phone).map(value => chatList<ChatConversation>(`/v1/conversations?search=${encodeURIComponent(value)}&instance_id=${encodeURIComponent(instanceId)}`)));
+  return pages.flat().find(conversation => conversation.instance_id === instanceId && sameChatPhone(conversation.phone, phone)) ?? null;
+}
+
+function isDuplicateResource(error: unknown) {
+  return error instanceof ChatRequestError && (error.status === 409 || error.code === "duplicate_resource" || /(?:already exists|já existe)/i.test(error.message));
+}
+
 export async function contactForChatInstance(contact: { id: string; name: string | null; phone: string | null; is_active: boolean; instance_id: string | null }, instanceId: string) {
   if (!contact.phone) throw new Error("Telefone não informado.");
-  if (contact.instance_id === instanceId) return contact;
   const phone = contact.phone.replace(/\D/g, "");
-  const find = async () => (await chatList<typeof contact>(`/v1/contacts?phone=${encodeURIComponent(phone)}&is_active=true`))
-    .filter(candidate => candidate.phone?.replace(/\D/g, "") === phone);
+  if (contact.instance_id === instanceId && sameChatPhone(contact.phone, phone)) return contact;
+  const find = async () => contactsForPhone<typeof contact>(phone);
   const candidates = await find();
   const existing = candidates.find(candidate => candidate.instance_id === instanceId);
   if (existing) return existing;
@@ -47,7 +77,7 @@ export async function contactForChatInstance(contact: { id: string; name: string
     const result = await chatRequest<{ data: typeof contact }>("/v1/contacts", { method: "POST", body: { name: contact.name ?? "Cliente", phone, instance_id: instanceId, source: "api" } });
     return result.data;
   } catch (error) {
-    if (error instanceof ChatRequestError && error.status === 409) {
+    if (isDuplicateResource(error)) {
       const refreshed = await find();
       const raced = refreshed.find(candidate => candidate.instance_id === instanceId);
       if (raced) return raced;
@@ -56,6 +86,23 @@ export async function contactForChatInstance(contact: { id: string; name: string
       // API resolve the contact for the requested instance safely.
       const sibling = refreshed[0] ?? candidates[0];
       if (sibling) return sibling;
+    }
+    throw error;
+  }
+}
+
+export async function openChatConversation(contact: { id: string; name: string | null; phone: string | null; is_active: boolean; instance_id: string | null }, instanceId: string, idempotencyKey: string) {
+  if (!contact.phone) throw new Error("Telefone não informado.");
+  const existing = await conversationForChatInstance(contact.phone, instanceId);
+  if (existing) return existing;
+  const recipient = await contactForChatInstance(contact, instanceId);
+  try {
+    const { data } = await chatRequest<{ data: ChatConversation }>("/v1/conversations", { method: "POST", idempotencyKey, body: { contact_id: recipient.id, instance_id: instanceId } });
+    return data;
+  } catch (error) {
+    if (isDuplicateResource(error)) {
+      const recovered = await conversationForChatInstance(contact.phone, instanceId);
+      if (recovered) return recovered;
     }
     throw error;
   }

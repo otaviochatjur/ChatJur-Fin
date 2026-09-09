@@ -87,8 +87,7 @@ export async function POST(request: Request) {
       return Response.json({ error: "Os dados mudaram ou a prévia expirou. Prepare e revise novamente." }, { status: 409 });
     }
     const result = await dispatchCollection(row, today);
-    if (result.skipped) return Response.json({ error: "Esta etapa já possui uma tentativa registrada. Confira o histórico." }, { status: 409 });
-    return Response.json({ ok: true });
+    return Response.json({ ok: true, skipped: result.skipped });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Não foi possível enviar." }, { status: 400 });
   }

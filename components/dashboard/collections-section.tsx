@@ -67,7 +67,7 @@ export function CollectionsSection({ payments, customers, subscriptions, impleme
       await runCollectionBatch(batch, async row => {
         const r = await fetch("/api/collections", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ paymentId: row.payment.id, instanceId: senderId, approval: row.approval, approved: true }), signal: AbortSignal.timeout(60000) });
         const data = await r.json();
-        return { ok: r.ok, message: r.ok ? "Enviado" : data.error ?? "Falha no envio. Consulte o histórico." };
+        return { ok: r.ok, message: r.ok ? (data.skipped ? "Já enviada anteriormente" : "Enviado") : data.error ?? "Falha no envio. Consulte o histórico." };
       }, (row, result, completed) => {
         setResults(current => ({ ...current, [row.payment.id]: result.message }));
         if (result.ok) setSelected(current => { const next = new Set(current); next.delete(row.payment.asaas_payment_id ?? row.payment.id); return next; });

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { currentTenant } from './tenant-server';
 import { supabaseRequest } from './supabase-server';
-import { chatRequest, contactForChatInstance, requireConnectedChatInstance } from './chat-juridico-server';
+import { chatRequest, openChatConversation, requireConnectedChatInstance, sameChatPhone } from './chat-juridico-server';
 import { type BillingContact, type CollectionPreview } from './collection-policy';
 /** Shared atomic claim: manual and scheduled execution cannot repeat the same payment/day/stage. */
 export async function dispatchCollection(row: CollectionPreview, today: string) {
@@ -22,12 +22,12 @@ export async function dispatchCollection(row: CollectionPreview, today: string) 
     else await supabaseRequest("/rest/v1/audit_events", { method: "POST", body: { id, entity_type: "collection_send", entity_id: payment.id, action: "SENDING", after_json: { ...row, date: today } } });
     attemptId = id;
     phase = 'recipient';
-    const recipient = await contactForChatInstance(row.contact, row.instance_id);
+    if (!row.contact.phone) throw new Error("Telefone não informado.");
     phase = 'conversation';
-    const { data: conversation } = await chatRequest<{ data: { id: string; instance_id: string; contact_id: string } }>("/v1/conversations", { method: "POST", idempotencyKey: `conversation-${id}`, body: { contact_id: recipient.id, instance_id: row.instance_id } });
+    const conversation = await openChatConversation(row.contact, row.instance_id, `conversation-${id}`);
     if (conversation.instance_id !== row.instance_id || !conversation.contact_id) throw new Error("A conversa retornada não corresponde ao número escolhido.");
     const { data: resolved } = await chatRequest<{ data: BillingContact }>(`/v1/contacts/${encodeURIComponent(conversation.contact_id)}`);
-    if (resolved.instance_id !== row.instance_id || resolved.is_active !== true || resolved.phone?.replace(/\D/g, "") !== row.contact.phone?.replace(/\D/g, "")) throw new Error("A conversa retornada não corresponde ao destinatário aprovado.");
+    if (resolved.is_active !== true || !sameChatPhone(resolved.phone, row.contact.phone)) throw new Error("A conversa retornada não corresponde ao destinatário aprovado.");
     phase = 'message';
     messageRequested = true;
     await chatRequest(`/v1/conversations/${encodeURIComponent(conversation.id)}/messages`, { method: "POST", idempotencyKey: `collection-${id}`, body: { type: "template", instance_id: row.instance_id, template: { name: row.stage, language: row.language, parameters: row.parameters } } });
