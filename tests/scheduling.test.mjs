@@ -65,6 +65,38 @@ test('disabled scheduling makes no provider calls and creates no jobs', async ()
   finally { globalThis.fetch = original; for (const key of ['SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY']) { if (env[key] === undefined) delete process.env[key]; else process.env[key] = env[key]; } }
 });
 
+test('background scheduler does not tick or show transient errors when no schedule is enabled', async () => {
+  const { pollCollectionSchedule } = await vite.ssrLoadModule('/components/dashboard/background-updates.tsx');
+  const originalFetch = globalThis.fetch;
+  try {
+    const calls = [];
+    globalThis.fetch = async (input, options = {}) => {
+      calls.push({ input, options });
+      return Response.json({ config: { ...DEFAULT_SCHEDULE } });
+    };
+    assert.deepEqual(await pollCollectionSchedule(false), { enabled: false, active: false, error: '' });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].options.method, undefined);
+
+    calls.length = 0;
+    globalThis.fetch = async (input, options = {}) => {
+      calls.push({ input, options });
+      return calls.length === 1
+        ? Response.json({ config: { ...DEFAULT_SCHEDULE, enabled: true, instanceId: FINANCIAL_INSTANCE } })
+        : Response.json({ active: true });
+    };
+    assert.deepEqual(await pollCollectionSchedule(false), { enabled: true, active: true, error: '' });
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].options.method, 'POST');
+
+    globalThis.fetch = async () => Response.json({ error: 'internal error; reference = test' }, { status: 500 });
+    assert.deepEqual(await pollCollectionSchedule(false), { enabled: false, active: false, error: '' });
+    assert.match((await pollCollectionSchedule(true)).error, /internal error/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('scheduled worker rechecks Asaas and skips a payment settled after the queue was built', async () => {
   const { advanceSchedule } = await vite.ssrLoadModule('/lib/collection-schedule-server.ts');
   const { sealSecret } = await vite.ssrLoadModule('/lib/integrations-server.ts');
