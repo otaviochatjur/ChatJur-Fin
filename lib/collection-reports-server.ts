@@ -9,6 +9,7 @@ import { supabaseRequest } from "./supabase-server";
 import { collectionSchedule, collectionToday, dayDistance } from "./collection-policy";
 import { isCollectionBusinessDay } from "./collection-calendar";
 import type { CollectionReport, ReportMode, ReportRow, ReportSnapshot } from "./collection-report-types";
+import { excludedAsaasCustomerIds } from "./customer-asaas-aliases";
 
 type SourcePayment = AsaasPayment & { invoiceUrl?: string; bankSlipUrl?: string };
 async function sourceReader() {
@@ -60,7 +61,9 @@ export async function advanceCollectionReport(id: string) {
     const status = statuses[report.phase];
     const page = await read<{ data: SourcePayment[]; hasMore: boolean }>(`/payments?limit=${report.mode === "ALL" ? 100 : 25}&offset=${report.page_offset}${status ? `&status=${status}` : ""}`);
     if (!Array.isArray(page.data) || typeof page.hasMore !== "boolean" || (page.hasMore && !page.data.length)) throw new Error("Asaas retornou uma página incompleta. Retome a consulta.");
-    const selected = report.mode === "DAILY" ? page.data.filter(p => collectionSchedule(p.dueDate ?? null, report.report_date, rulesForCustomer(report.rule_config, p.customer)).stage) : page.data;
+    const scheduled = report.mode === "DAILY" ? page.data.filter(p => collectionSchedule(p.dueDate ?? null, report.report_date, rulesForCustomer(report.rule_config, p.customer)).stage) : page.data;
+    const excluded = await excludedAsaasCustomerIds(scheduled.map(payment => payment.customer));
+    const selected = scheduled.filter(payment => !excluded.has(payment.customer));
     const customerIds = [...new Set(selected.map(p => p.customer))];
     const customers = new Map(await parallel(customerIds, async customerId => {
       try { return [customerId, await customerCache.get(scope, customerId, () => read<AsaasCustomer>(`/customers/${encodeURIComponent(customerId)}`))] as const; }

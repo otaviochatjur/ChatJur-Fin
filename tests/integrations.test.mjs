@@ -106,6 +106,7 @@ test("paid sync records payments without reactivating a manually disabled subscr
       globalThis.fetch = async (input, options) => {
         const url = new URL(input); const table = url.pathname.split("/").at(-1);
         if (options.method !== "GET") { mutations.push({ table, body: JSON.parse(options.body) }); return Response.json([]); }
+        if (table === "asaas_customer_exclusions") return Response.json([]);
         if (table === "customers") return Response.json([{ id: "customer", status: "ACTIVE" }]);
         if (table === "payment_links") return Response.json([{ id: "link", plans: { kind: "RECURRING" }, value: 100, billing_period: "MONTHLY" }]);
         if (table === "subscriptions") return Response.json([{ id: "subscription", customer_id: "customer", payment_link_id: "link", status: "CANCELLED", status_manually_set: true, asaas_subscription_id: "asaas-sub", billing_period: "MONTHLY", value: 100 }]);

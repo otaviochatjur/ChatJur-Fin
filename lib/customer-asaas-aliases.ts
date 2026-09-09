@@ -1,4 +1,5 @@
 import { supabaseRequest } from "./supabase-server";
+import { currentTenant } from "./tenant-server";
 
 export type StoredAsaasCustomer = {
   id: string;
@@ -13,6 +14,18 @@ export type StoredAsaasCustomer = {
 };
 
 const CUSTOMER_SELECT = "id,asaas_customer_id,external_office_id,acquisition_actor_id,office_name,responsible_name,email,phone,status";
+const exclusionCache = new Map<string, { expiresAt: number; ids: Set<string> }>();
+
+export async function excludedAsaasCustomerIds(asaasCustomerIds: string[]) {
+  const tenant = await currentTenant();
+  let cached = exclusionCache.get(tenant.id);
+  if (!cached || cached.expiresAt <= Date.now()) {
+    const rows = await supabaseRequest<{ asaas_customer_id: string }[]>("/rest/v1/asaas_customer_exclusions?select=asaas_customer_id");
+    cached = { expiresAt: Date.now() + 60_000, ids: new Set(rows.map(row => row.asaas_customer_id)) };
+    exclusionCache.set(tenant.id, cached);
+  }
+  return new Set(asaasCustomerIds.filter(id => cached.ids.has(id)));
+}
 
 async function oneCustomer(filter: string) {
   const rows = await supabaseRequest<StoredAsaasCustomer[]>(`/rest/v1/customers?select=${CUSTOMER_SELECT}&${filter}&order=id.asc&limit=1`);
@@ -21,6 +34,7 @@ async function oneCustomer(filter: string) {
 
 /** Resolve tanto o ID principal quanto qualquer cus_* adicional do mesmo cliente. */
 export async function findCustomerByAsaasId(asaasCustomerId: string) {
+  if ((await excludedAsaasCustomerIds([asaasCustomerId])).has(asaasCustomerId)) return null;
   const direct = await oneCustomer(`asaas_customer_id=eq.${encodeURIComponent(asaasCustomerId)}`);
   if (direct) return direct;
   const aliases = await supabaseRequest<{ customer_id: string }[]>(`/rest/v1/customer_asaas_aliases?select=customer_id&asaas_customer_id=eq.${encodeURIComponent(asaasCustomerId)}&limit=1`);

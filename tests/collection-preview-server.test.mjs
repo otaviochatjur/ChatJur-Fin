@@ -23,6 +23,7 @@ test("builds the selected recipient from Asaas and the internal customer status 
     const url = new URL(input);
     assert.notEqual(url.host, "api.jur.chat", "Preparing a recipient must not read Chat Jurídico payments or contacts");
     if (url.pathname === "/rest/v1/nexo_integrations") return Response.json([]);
+    if (url.pathname === "/rest/v1/asaas_customer_exclusions") return Response.json([]);
     if (url.pathname === "/rest/v1/customer_asaas_aliases") return Response.json([{ customer_id: "customer-1" }]);
     if (url.pathname === "/rest/v1/customers") {
       if (url.searchParams.has("asaas_customer_id") && useAlias) return Response.json([]);
@@ -46,6 +47,30 @@ test("builds the selected recipient from Asaas and the internal customer status 
     status = "FROZEN";
     const frozen = await withWebhookTenant({ id: "tenant", legacy: true }, () => freshCollectionPreview("pay_selected", instanceId, [template], DEFAULT_COLLECTION_SETTINGS, today));
     assert.equal(frozen.blocked, "Cliente sem status Ativo confirmado");
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const key of Object.keys(process.env)) if (!(key in previous)) delete process.env[key];
+    Object.assign(process.env, previous);
+  }
+});
+
+test("an explicitly excluded Asaas customer cannot be resolved into collection reports", async () => {
+  const { findCustomerByAsaasId } = await vite.ssrLoadModule("/lib/customer-asaas-aliases.ts");
+  const { withWebhookTenant } = await vite.ssrLoadModule("/lib/tenant-server.ts");
+  const originalFetch = globalThis.fetch;
+  const previous = { ...process.env };
+  Object.assign(process.env, { SUPABASE_URL: "https://db.invalid", SUPABASE_SERVICE_ROLE_KEY: "test" });
+  let customerReads = 0;
+  globalThis.fetch = async input => {
+    const url = new URL(input);
+    if (url.pathname === "/rest/v1/asaas_customer_exclusions") return Response.json([{ asaas_customer_id: "cus_test" }]);
+    if (url.pathname === "/rest/v1/customers") customerReads += 1;
+    return Response.json([]);
+  };
+  try {
+    const customer = await withWebhookTenant({ id: "tenant-with-exclusion", legacy: true }, () => findCustomerByAsaasId("cus_test"));
+    assert.equal(customer, null);
+    assert.equal(customerReads, 0);
   } finally {
     globalThis.fetch = originalFetch;
     for (const key of Object.keys(process.env)) if (!(key in previous)) delete process.env[key];
