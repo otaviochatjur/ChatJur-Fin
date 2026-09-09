@@ -50,7 +50,7 @@ async function resolvePaymentLink(asaasPaymentLinkId: string | null | undefined)
   return { ...rest, plan_kind: plans?.kind ?? null };
 }
 
-async function resolveCustomer(payment: AsaasPayment, link: PaymentLinkRow): Promise<CustomerRow | null> {
+async function resolveCustomer(payment: AsaasPayment, actorId: string | null): Promise<CustomerRow | null> {
   const existing = await findCustomerByAsaasId(payment.customer);
   if (existing) return existing;
 
@@ -119,7 +119,7 @@ async function resolveCustomer(payment: AsaasPayment, link: PaymentLinkRow): Pro
       responsible_name: sheetRow?.responsibleName ?? details.name ?? null,
       email: details.email ?? null,
       phone: sheetRow?.phone ?? details.mobilePhone ?? details.phone ?? null,
-      acquisition_actor_id: link.actor_id,
+      acquisition_actor_id: actorId,
       source_channel: "ASAAS_SYNC",
       status: "ACTIVE",
     },
@@ -443,7 +443,7 @@ export async function syncAsaasPayment(payment: AsaasPayment) {
     const link = await resolvePaymentLink(payment.paymentLink);
     if (!link) return { result: "skipped" as const, reason: `paymentLink ${payment.paymentLink} is not one of ours` };
 
-    const customer = await resolveCustomer(payment, link);
+    const customer = await resolveCustomer(payment, link.actor_id);
     if (!customer) return { result: "skipped" as const, reason: "E-mail do pagador não encontrado na aba ⭐ Base de Clientes; inclua-o lá para permitir a criação automática do cliente." };
 
     // Implantação (taxa única — API Oficial da Meta, Claude/IA, etc.) ou
@@ -461,8 +461,13 @@ export async function syncAsaasPayment(payment: AsaasPayment) {
 
   // No paymentLink on this payment: only trust it if it clearly continues a
   // customer/subscription we already track (see resolveOrphanSubscription).
-  const customer = await findCustomerByAsaasId(payment.customer);
-  if (!customer) return { result: "skipped" as const, reason: "no paymentLink and this Asaas customer isn't one of ours yet" };
+  // Some recurring charges created by another Chat Juridico checkout carry
+  // `subscription` and `externalReference`, but Asaas leaves `paymentLink`
+  // empty. They still belong in our customer base when the payer is present
+  // in the Base de Clientes sheet. Create/remember that customer first; the
+  // charge itself remains unlinked until we can identify one of our plans.
+  const customer = await resolveCustomer(payment, null);
+  if (!customer) return { result: "skipped" as const, reason: "no paymentLink and payer isn't in Base de Clientes" };
 
   // Checked before ever trying to match a subscription: an orphan charge
   // whose description reads as a one-time implantação/consultoria product

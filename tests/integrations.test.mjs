@@ -124,6 +124,67 @@ test("paid sync records payments without reactivating a manually disabled subscr
   }
 });
 
+test("a payment without paymentLink still imports a payer listed in Base de Clientes", async () => {
+  const { withWebhookTenant } = await vite.ssrLoadModule("/lib/tenant-server.ts");
+  const { syncAsaasPayment } = await vite.ssrLoadModule("/lib/payment-sync.ts");
+  const previousFetch = globalThis.fetch;
+  const previous = { ...process.env };
+  Object.assign(process.env, {
+    SUPABASE_URL: "https://db.invalid",
+    SUPABASE_SERVICE_ROLE_KEY: "test",
+    ASAAS_API_KEY: "asaas-test",
+    ASAAS_BASE_URL: "https://asaas.invalid/v3",
+    CLIENTS_SHEET_WEBHOOK_URL: "https://sheet.invalid/clients",
+    CLIENTS_SHEET_WEBHOOK_AUTH: "sheet-test",
+  });
+  const mutations = [];
+  globalThis.fetch = async (input, options = {}) => {
+    const url = new URL(input);
+    if (url.host === "asaas.invalid") {
+      assert.equal(url.pathname, "/v3/customers/asaas-new");
+      return Response.json({ id: "asaas-new", name: "Davi Lessa", email: "davilessa2002@gmail.com", phone: "21996812002" });
+    }
+    if (url.host === "sheet.invalid") {
+      assert.equal(options.headers["sisfin-auth"], "sheet-test");
+      return Response.json([{ Email: " davilessa2002@gmail.com ", office_id: "", "Nome do Escritório": "DAVI LESSA", "Nome do Responsável": "DAVI LESSA", "Whatsapp Responsável": "21 99681-2002" }]);
+    }
+    if (url.host === "db.invalid") {
+      const table = url.pathname.split("/").at(-1);
+      if (!options.method || options.method === "GET") return Response.json([]);
+      const body = JSON.parse(options.body);
+      mutations.push({ table, body });
+      if (table === "customers") return Response.json([{ id: "customer-davi", ...body }]);
+      return Response.json([]);
+    }
+    throw new Error(`Unexpected request ${url}`);
+  };
+  try {
+    const result = await withWebhookTenant({ id: "tenant-a", legacy: true }, () => syncAsaasPayment({
+      id: "payment-davi",
+      customer: "asaas-new",
+      subscription: "asaas-subscription",
+      paymentLink: null,
+      value: 5,
+      status: "RECEIVED",
+    }));
+    assert.equal(result.result, "skipped");
+    assert.match(result.reason, /no existing subscription/);
+    const customer = mutations.find(row => row.table === "customers").body;
+    assert.equal(customer.email, "davilessa2002@gmail.com");
+    assert.equal(customer.office_name, "DAVI LESSA");
+    assert.equal(customer.acquisition_actor_id, null);
+    assert.equal(customer.status, "ACTIVE");
+    const alias = mutations.find(row => row.table === "customer_asaas_aliases").body;
+    assert.equal(alias.customer_id, "customer-davi");
+    assert.equal(alias.asaas_customer_id, "asaas-new");
+  } finally {
+    globalThis.fetch = previousFetch;
+    for (const key of ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "ASAAS_API_KEY", "ASAAS_BASE_URL", "CLIENTS_SHEET_WEBHOOK_URL", "CLIENTS_SHEET_WEBHOOK_AUTH"]) {
+      if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key];
+    }
+  }
+});
+
 test("API keys are encrypted and bound to their tenant and provider", async () => {
   const { sealSecret, openSecret } = await vite.ssrLoadModule("/lib/integrations-server.ts");
   const previous = process.env.INTEGRATIONS_ENCRYPTION_KEY;
