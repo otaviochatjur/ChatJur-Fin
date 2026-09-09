@@ -3,6 +3,7 @@ import { fetchAsaasCustomer, type AsaasCustomer, type AsaasPayment } from "@/lib
 import { findClientInSheet } from "@/lib/clients-allowlist";
 import { isOneTimePlanKind, type Plan } from "@/lib/metrics";
 import { supabaseRequest } from "@/lib/supabase-server";
+import { findCustomerByAsaasId, rememberCustomerAsaasId, type StoredAsaasCustomer } from "@/lib/customer-asaas-aliases";
 
 type PaymentLinkRow = {
   id: string;
@@ -15,7 +16,7 @@ type PaymentLinkRow = {
   /** Kind of the bound plan, if any — IMPLEMENTATION/CONSULTING route the payment to `implementation_payments` instead of subscriptions/payments (see `isOneTimePlanKind`). Unbound links (plan_id null) behave like RECURRING, matching prior behavior. */
   plan_kind: Plan["kind"] | null;
 };
-type CustomerRow = { id: string; email: string | null; asaas_customer_id: string | null; acquisition_actor_id: string | null; status: string };
+type CustomerRow = StoredAsaasCustomer;
 type SubscriptionRow = { id: string; status: string; status_manually_set?: boolean; asaas_subscription_id: string | null; asaas_installment_id: string | null };
 /** Full shape needed to keep tracking a subscription whose payments stopped carrying a `paymentLink` (see `resolveOrphanSubscription`). */
 type SubscriptionFullRow = SubscriptionRow & {
@@ -50,9 +51,7 @@ async function resolvePaymentLink(asaasPaymentLinkId: string | null | undefined)
 }
 
 async function resolveCustomer(payment: AsaasPayment, link: PaymentLinkRow): Promise<CustomerRow | null> {
-  const existing = await findOne<CustomerRow>(
-    `/rest/v1/customers?select=id,email,asaas_customer_id,acquisition_actor_id,status&asaas_customer_id=eq.${encodeURIComponent(payment.customer)}`,
-  );
+  const existing = await findCustomerByAsaasId(payment.customer);
   if (existing) return existing;
 
   let details: Partial<AsaasCustomer> = {};
@@ -73,6 +72,7 @@ async function resolveCustomer(payment: AsaasPayment, link: PaymentLinkRow): Pro
         prefer: "return=representation",
         body: { asaas_customer_id: payment.customer },
       });
+      if (updated) await rememberCustomerAsaasId(updated, payment.customer);
       return updated;
     }
   }
@@ -103,7 +103,10 @@ async function resolveCustomer(payment: AsaasPayment, link: PaymentLinkRow): Pro
     const byOffice = await findOne<CustomerRow>(
       `/rest/v1/customers?select=id,email,asaas_customer_id,acquisition_actor_id,status&external_office_id=eq.${encodeURIComponent(sheetRow.officeId)}`,
     );
-    if (byOffice) return byOffice;
+    if (byOffice) {
+      await rememberCustomerAsaasId(byOffice, payment.customer);
+      return byOffice;
+    }
   }
 
   const [created] = await supabaseRequest<CustomerRow[]>("/rest/v1/customers", {
@@ -121,6 +124,7 @@ async function resolveCustomer(payment: AsaasPayment, link: PaymentLinkRow): Pro
       status: "ACTIVE",
     },
   });
+  if (created) await rememberCustomerAsaasId(created, payment.customer);
   return created ?? null;
 }
 
@@ -457,9 +461,7 @@ export async function syncAsaasPayment(payment: AsaasPayment) {
 
   // No paymentLink on this payment: only trust it if it clearly continues a
   // customer/subscription we already track (see resolveOrphanSubscription).
-  const customer = await findOne<CustomerRow>(
-    `/rest/v1/customers?select=id,email,asaas_customer_id,acquisition_actor_id,status&asaas_customer_id=eq.${encodeURIComponent(payment.customer)}`,
-  );
+  const customer = await findCustomerByAsaasId(payment.customer);
   if (!customer) return { result: "skipped" as const, reason: "no paymentLink and this Asaas customer isn't one of ours yet" };
 
   // Checked before ever trying to match a subscription: an orphan charge

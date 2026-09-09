@@ -4,16 +4,7 @@ import type { CollectionSettings } from "./collection-rules";
 import { canonicalBillingPayment, previewCollection, type BillingContact, type BillingTemplate } from "./collection-policy";
 import type { CollectionCalendar } from "./collection-calendar";
 import type { CollectionScheduleConfig } from "./collection-schedule";
-import { supabaseRequest } from "./supabase-server";
-
-type StoredCustomer = {
-  id: string;
-  asaas_customer_id: string;
-  status: "ACTIVE" | "CANCELLED" | "FROZEN" | null;
-  phone: string | null;
-  responsible_name: string | null;
-  office_name: string | null;
-};
+import { findCustomerByAsaasId } from "./customer-asaas-aliases";
 
 export function normalizeCollectionPhone(value: string | null | undefined) {
   let phone = value?.replace(/\D/g, "") ?? "";
@@ -32,11 +23,10 @@ export async function freshCollectionPreview(
   calendar?: CollectionCalendar,
 ) {
   const source = await asaasRequest<AsaasPayment & { invoiceUrl?: string; deleted?: boolean }>(`/payments/${encodeURIComponent(asaasPaymentId)}`);
-  const [payer, storedRows] = await Promise.all([
+  const [payer, stored] = await Promise.all([
     asaasRequest<AsaasCustomer>(`/customers/${encodeURIComponent(source.customer)}`),
-    supabaseRequest<StoredCustomer[]>(`/rest/v1/customers?select=id,asaas_customer_id,status,phone,responsible_name,office_name&asaas_customer_id=eq.${encodeURIComponent(source.customer)}&order=id.asc&limit=1`),
+    findCustomerByAsaasId(source.customer),
   ]);
-  const stored = storedRows[0];
   const phone = normalizeCollectionPhone(payer.mobilePhone || payer.phone) ?? normalizeCollectionPhone(stored?.phone);
   const contact: BillingContact = {
     id: stored?.id ?? `asaas:${source.customer}`,
