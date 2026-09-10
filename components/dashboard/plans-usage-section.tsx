@@ -6,12 +6,33 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Combobox, ComboboxContent, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList, ComboboxTrigger, ComboboxValue } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge } from "@/components/dashboard/status-badge";
 import { ColumnVisibilityMenu, ResizableTh, useTableSort, useColumnVisibility, useColumnWidths, type ColumnDef } from "@/components/dashboard/table-toolbar";
+import { cn } from "@/lib/utils";
 import { isOneTimePlanKind, money, planBadgeClass, planKindLabels, type CommercialActor, type PaymentLink, type Plan } from "@/lib/metrics";
+
+type ComboOption = { value: string; label: string };
+
+/** Searchable trigger+popup select (see the Cliente filter on Visão geral) — used here for the actor filter and the per-row actor/plan pickers, all of which can have 50-100+ options that a plain `<select>` makes unusable. */
+function EntitySelect({ value, onValueChange, options, placeholder, className }: { value: string; onValueChange: (value: string) => void; options: ComboOption[]; placeholder: string; className?: string }) {
+  const selected = options.find((option) => option.value === value) ?? options[0];
+  return (
+    <Combobox items={options} value={selected} onValueChange={(item) => onValueChange(item?.value ?? options[0].value)} limit={50}>
+      <ComboboxTrigger className={cn("flex h-9 items-center justify-between gap-2 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs text-left dark:bg-input/30 dark:hover:bg-input/50", className)}>
+        <ComboboxValue placeholder={placeholder} />
+      </ComboboxTrigger>
+      <ComboboxContent>
+        <div className="p-1"><ComboboxInput placeholder="Buscar…" showTrigger={false} className="w-full" /></div>
+        <ComboboxEmpty>Nenhum resultado.</ComboboxEmpty>
+        <ComboboxList>{(item: ComboOption) => <ComboboxItem key={item.value} value={item}>{item.label}</ComboboxItem>}</ComboboxList>
+      </ComboboxContent>
+    </Combobox>
+  );
+}
 
 const linkFilters = ["ALL", "PENDING", "ACTIVE", "INACTIVE"] as const;
 const linkFilterLabels: Record<(typeof linkFilters)[number], string> = { ALL: "Todos", PENDING: "Pendentes", ACTIVE: "Vinculados", INACTIVE: "Inativos" };
@@ -159,7 +180,9 @@ function PlansPanel({ links, onChanged }: { links: PaymentLink[]; onChanged: () 
         <h2 className="font-semibold">Catálogo de planos</h2>
         <p className="mt-1 text-sm text-slate-500 dark:text-muted-foreground">Cadastre aqui os planos existentes para depois vincular os links de pagamento a eles.</p>
       </div>
-      <div className="flex flex-wrap items-end gap-2 border-b border-slate-100 dark:border-border p-4">
+      <div className="border-b border-slate-100 dark:border-border bg-slate-50/60 p-4 dark:bg-input/10">
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-muted-foreground">Novo plano</p>
+      <div className="flex flex-wrap items-end gap-2">
         <Input className="w-28" placeholder="Código" value={form.code} onChange={(event) => setForm((current) => ({ ...current, code: event.target.value }))} />
         <Input className="flex-1 min-w-[180px]" placeholder="Nome do plano" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} />
         <Select value={form.kind} onValueChange={(value) => setForm((current) => ({ ...current, kind: value as Plan["kind"] }))}>
@@ -182,6 +205,7 @@ function PlansPanel({ links, onChanged }: { links: PaymentLink[]; onChanged: () 
         <Input className="w-40" type="number" min="0.01" step="0.01" placeholder={isOneTimePlanKind(form.kind) ? "Valor padrão (opcional)" : "Valor padrão"} value={form.standardValue} onChange={(event) => setForm((current) => ({ ...current, standardValue: event.target.value }))} />
         {showInstallments && <Input className="w-24" type="number" min="1" max="12" placeholder="Até Nx" value={form.annualInstallmentLimit} onChange={(event) => setForm((current) => ({ ...current, annualInstallmentLimit: event.target.value }))} />}
         <Button disabled={creating || !form.code.trim() || !form.name.trim() || (!isOneTimePlanKind(form.kind) && !(Number(form.standardValue) > 0))} onClick={createPlan} className="bg-[#3a5d9d] text-white hover:bg-[#2c4a80]">{creating ? "Criando…" : "+ Novo plano"}</Button>
+      </div>
       </div>
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 dark:border-border p-4">
         {planKindFilters.map((value) => (
@@ -520,27 +544,25 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
           <Button variant="outline" size="sm" onClick={syncFromAsaas}>Sincronizar links do Asaas</Button>
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 dark:border-border p-4">
-        {linkFilters.map((value) => (
-          <button key={value} onClick={() => setFilter(value)} className={`rounded-lg px-3 py-1.5 text-sm ${filter === value ? "bg-accent text-accent-foreground" : "text-slate-500 dark:text-muted-foreground hover:bg-slate-50 dark:hover:bg-muted"}`}>
-            {linkFilterLabels[value]}{value === "PENDING" && pendingCount > 0 ? ` (${pendingCount})` : ""}
-          </button>
-        ))}
-        <span className="h-5 w-px bg-slate-200 dark:bg-accent" />
-        {planKindFilters.map((value) => (
-          <button key={value} onClick={() => setKindFilter(value)} className={`rounded-lg px-3 py-1.5 text-sm ${kindFilter === value ? "bg-accent text-accent-foreground" : "text-slate-500 dark:text-muted-foreground hover:bg-slate-50 dark:hover:bg-muted"}`}>
-            {planKindFilterLabels[value]}
-          </button>
-        ))}
-        <Select value={actorFilter} onValueChange={setActorFilter}>
-          <SelectTrigger className="w-44"><SelectValue placeholder="Ator" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos os atores</SelectItem>
-            {actors.map((actor) => <SelectItem key={actor.id} value={actor.id}>{actor.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Input className="ml-auto w-56" placeholder="Buscar pelo nome do link" value={search} onChange={(event) => setSearch(event.target.value)} />
-        <ColumnVisibilityMenu defs={linkColumns} isVisible={columns.isVisible} toggle={columns.toggle} />
+      <div className="space-y-2.5 border-b border-slate-100 dark:border-border p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          {linkFilters.map((value) => (
+            <button key={value} onClick={() => setFilter(value)} className={`rounded-lg px-3 py-1.5 text-sm ${filter === value ? "bg-accent text-accent-foreground" : "text-slate-500 dark:text-muted-foreground hover:bg-slate-50 dark:hover:bg-muted"}`}>
+              {linkFilterLabels[value]}{value === "PENDING" && pendingCount > 0 ? ` (${pendingCount})` : ""}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {planKindFilters.map((value) => (
+            <button key={value} onClick={() => setKindFilter(value)} className={`rounded-lg px-3 py-1.5 text-sm ${kindFilter === value ? "bg-accent text-accent-foreground" : "text-slate-500 dark:text-muted-foreground hover:bg-slate-50 dark:hover:bg-muted"}`}>
+              {planKindFilterLabels[value]}
+            </button>
+          ))}
+          <span className="h-5 w-px bg-slate-200 dark:bg-accent" />
+          <EntitySelect className="w-44" value={actorFilter} onValueChange={setActorFilter} placeholder="Ator" options={[{ value: "all", label: "Todos os atores" }, ...actors.map((actor) => ({ value: actor.id, label: actor.name }))]} />
+          <Input className="ml-auto w-56" placeholder="Buscar pelo nome do link" value={search} onChange={(event) => setSearch(event.target.value)} />
+          <ColumnVisibilityMenu defs={linkColumns} isVisible={columns.isVisible} toggle={columns.toggle} />
+        </div>
       </div>
       <Table className="table-fixed">
         <TableHeader>
@@ -649,7 +671,7 @@ const LinkRow = memo(function LinkRow({
   onToggleStatus: (id: string) => void;
 }) {
   return (
-    <TableRow className={dirty ? "bg-amber-50/60" : undefined}>
+    <TableRow className={dirty ? "bg-amber-50 dark:bg-amber-950/40" : undefined}>
       <TableCell><Checkbox checked={selected} onCheckedChange={(checked) => onToggleSelected(link.id, checked === true)} aria-label={`Selecionar ${link.display_name}`} /></TableCell>
       <TableCell className="max-w-[240px] truncate font-medium" title={link.display_name}>
         {link.display_name}
@@ -657,24 +679,12 @@ const LinkRow = memo(function LinkRow({
       {showKind && <TableCell><Badge variant="outline" className={planBadgeClass({ kind, code: boundPlanCode })}>{planKindLabels[kind]}</Badge></TableCell>}
       {showActor && (
         <TableCell>
-          <Select value={draftActorId ?? "none"} onValueChange={(value) => onSetDraft(link.id, { actorId: value === "none" ? null : value })}>
-            <SelectTrigger className="w-44"><SelectValue placeholder="Sem ator" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">Sem ator</SelectItem>
-              {actors.map((actor) => <SelectItem key={actor.id} value={actor.id}>{actor.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <EntitySelect className="w-44" value={draftActorId ?? "none"} onValueChange={(value) => onSetDraft(link.id, { actorId: value === "none" ? null : value })} placeholder="Sem ator" options={[{ value: "none", label: "Sem ator" }, ...actors.map((actor) => ({ value: actor.id, label: actor.name }))]} />
         </TableCell>
       )}
       {showPlan && (
         <TableCell>
-          <Select value={draftPlanId ?? "none"} onValueChange={(value) => onSetDraft(link.id, { planId: value === "none" ? null : value })}>
-            <SelectTrigger className="w-44"><SelectValue placeholder="Sem plano" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">Sem plano</SelectItem>
-              {plans.map((plan) => <SelectItem key={plan.id} value={plan.id}>{plan.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <EntitySelect className="w-44" value={draftPlanId ?? "none"} onValueChange={(value) => onSetDraft(link.id, { planId: value === "none" ? null : value })} placeholder="Sem plano" options={[{ value: "none", label: "Sem plano" }, ...plans.map((plan) => ({ value: plan.id, label: plan.name }))]} />
         </TableCell>
       )}
       {showValue && <TableCell className="text-right text-sm">{money.format(link.value)}<span className="ml-1 text-xs text-slate-400">{link.billing_period === "ANNUAL" ? "/ano" : link.billing_period === "ONE_TIME" ? " · taxa única" : "/mês"}</span></TableCell>}

@@ -44,7 +44,7 @@ export function RevenueCharts({ subscriptions, payments }: { subscriptions: Subs
               <XAxis dataKey="plan" tickLine={false} axisLine={false} />
               <YAxis tickLine={false} axisLine={false} />
               <ChartTooltip content={<ChartTooltipContent />} />
-              <Bar dataKey="mrr" fill="var(--color-mrr)" radius={6} />
+              <Bar dataKey="mrr" fill="var(--color-mrr)" radius={6} maxBarSize={64} />
             </BarChart>
           </ChartContainer>
         )}
@@ -59,7 +59,7 @@ export function RevenueCharts({ subscriptions, payments }: { subscriptions: Subs
               <XAxis dataKey="month" tickLine={false} axisLine={false} />
               <YAxis tickLine={false} axisLine={false} />
               <ChartTooltip content={<ChartTooltipContent />} />
-              <Bar dataKey="realizado" fill="var(--color-realizado)" radius={6} />
+              <Bar dataKey="realizado" fill="var(--color-realizado)" radius={6} maxBarSize={64} />
             </BarChart>
           </ChartContainer>
         )}
