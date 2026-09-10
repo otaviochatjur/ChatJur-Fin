@@ -635,7 +635,7 @@ function LinksPanel({ links, actors, subscriptions, onChanged }: { links: Paymen
             {columns.isVisible("kind") && <ResizableTh {...sorting.header("kind")} width={widths.getWidth("kind")} onResizeStart={widths.startResize("kind")}>Tipo</ResizableTh>}
             {columns.isVisible("actor") && <ResizableTh {...sorting.header("actor")} width={widths.getWidth("actor")} onResizeStart={widths.startResize("actor")}>Ator</ResizableTh>}
             {columns.isVisible("plan") && <ResizableTh {...sorting.header("plan")} width={widths.getWidth("plan")} onResizeStart={widths.startResize("plan")}>Plano</ResizableTh>}
-            {columns.isVisible("subscriptions") && <ResizableTh {...sorting.header("subscriptions")} width={widths.getWidth("subscriptions")} onResizeStart={widths.startResize("subscriptions")} className="text-right">Assinaturas</ResizableTh>}
+            {columns.isVisible("subscriptions") && <ResizableTh {...sorting.header("subscriptions")} width={widths.getWidth("subscriptions")} onResizeStart={widths.startResize("subscriptions")} className="text-right" title="Total histórico de assinaturas criadas por este link">Assinaturas</ResizableTh>}
             {columns.isVisible("value") && <ResizableTh {...sorting.header("value")} width={widths.getWidth("value")} onResizeStart={widths.startResize("value")} className="text-right">Valor</ResizableTh>}
             {columns.isVisible("source") && <ResizableTh {...sorting.header("source")} width={widths.getWidth("source")} onResizeStart={widths.startResize("source")}>Origem</ResizableTh>}
             {columns.isVisible("status") && <ResizableTh {...sorting.header("status")} width={widths.getWidth("status")} onResizeStart={widths.startResize("status")}>Status</ResizableTh>}

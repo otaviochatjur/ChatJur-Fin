@@ -215,6 +215,7 @@ export type Payment = {
   due_date: string | null;
   payment_date: string | null;
   confirmed_date: string | null;
+  refunded_at?: string | null;
   created_at: string;
 };
 
@@ -248,6 +249,7 @@ export type ImplementationPayment = {
   due_date: string | null;
   payment_date: string | null;
   confirmed_date: string | null;
+  refunded_at?: string | null;
   created_at: string;
 };
 

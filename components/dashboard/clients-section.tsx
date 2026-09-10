@@ -69,7 +69,19 @@ function CustomizationHint({ items }: { items: ActiveCustomization[] }) {
 }
 
 function fmtDate(value: string | null) {
-  return value ? new Date(value).toLocaleDateString("pt-BR") : "—";
+  if (!value) return "—";
+  const dateOnly = value.slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return dateOnly ? `${dateOnly[3]}/${dateOnly[2]}/${dateOnly[1]}` : new Date(value).toLocaleDateString("pt-BR");
+}
+
+function PaymentDates({ payment }: { payment: Pick<Payment, "payment_date" | "confirmed_date" | "due_date" | "refunded_at"> }) {
+  const paidAt = payment.payment_date ?? payment.confirmed_date;
+  return (
+    <div className="text-right text-xs text-slate-500 dark:text-muted-foreground">
+      <p>{paidAt ? `Pago em ${fmtDate(paidAt)}` : `Vencimento ${fmtDate(payment.due_date)}`}</p>
+      {payment.refunded_at && <p className="font-medium text-red-600 dark:text-red-300">Estornado em {fmtDate(payment.refunded_at)}</p>}
+    </div>
+  );
 }
 
 type PaymentSyncRun = {
@@ -431,7 +443,7 @@ function ClientDetail({ customer, subscriptions, payments, implementationPayment
           {payments.slice(0, 20).map((payment) => (
             <div key={payment.id} className="flex items-center justify-between gap-2 text-sm">
               <span className={isPaidStatus(payment.status) ? "text-emerald-700 dark:text-emerald-300" : "text-slate-500 dark:text-muted-foreground"}>{payment.status}</span>
-              <span className="text-slate-500 dark:text-muted-foreground">{fmtDate(payment.payment_date ?? payment.due_date)}</span>
+              <PaymentDates payment={payment} />
               <span className="font-medium">{money.format(payment.value)}</span>
             </div>
           ))}
@@ -460,7 +472,7 @@ function ClientDetail({ customer, subscriptions, payments, implementationPayment
             <div key={payment.id} className="text-sm">
               <div className="flex items-center justify-between gap-2">
                 <span className={isPaidStatus(payment.status) ? "text-emerald-700 dark:text-emerald-300" : "text-slate-500 dark:text-muted-foreground"}>{payment.status}</span>
-                <span className="text-slate-500 dark:text-muted-foreground">{fmtDate(payment.payment_date ?? payment.due_date)}</span>
+                <PaymentDates payment={payment} />
                 <span className="font-medium">{money.format(payment.value)}</span>
               </div>
               <p className="flex items-center gap-1.5 truncate text-xs text-slate-500 dark:text-muted-foreground" title={payment.description}>

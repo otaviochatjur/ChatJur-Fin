@@ -94,7 +94,7 @@ test("Chat Jurídico exposes only connected senders and creates the recipient in
   }
 });
 
-test("paid sync records payments without reactivating a manually disabled subscription", async () => {
+test("payment sync records refund dates without reactivating a manually disabled subscription", async () => {
   const { withWebhookTenant } = await vite.ssrLoadModule("/lib/tenant-server.ts");
   const { syncAsaasPayment } = await vite.ssrLoadModule("/lib/payment-sync.ts");
   const previousFetch = globalThis.fetch;
@@ -113,10 +113,11 @@ test("paid sync records payments without reactivating a manually disabled subscr
         if (table === "payments") return Response.json([]);
         throw new Error(`Unexpected request ${table}`);
       };
-      const result = await withWebhookTenant({ id: "tenant-a", legacy: false }, () => syncAsaasPayment({ id: "pay", customer: "asaas-customer", subscription: "asaas-sub", paymentLink: linked ? "asaas-link" : null, value: 100, status: "RECEIVED" }));
+      const result = await withWebhookTenant({ id: "tenant-a", legacy: false }, () => syncAsaasPayment({ id: "pay", customer: "asaas-customer", subscription: "asaas-sub", paymentLink: linked ? "asaas-link" : null, value: 100, status: "REFUNDED", refunds: [{ status: "DONE", dateCreated: "2026-08-01 08:11:26" }] }));
       assert.equal(result.subscriptionId, "subscription");
       assert.equal(mutations.filter(m => m.table === "subscriptions").length, 0);
       assert.equal(mutations.filter(m => m.table === "payments").length, 1);
+      assert.equal(mutations.find(m => m.table === "payments").body.refunded_at, "2026-08-01");
     }
   } finally {
     globalThis.fetch = previousFetch;

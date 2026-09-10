@@ -33,6 +33,15 @@ const SUBSCRIPTION_FULL_SELECT = "id,status,status_manually_set,asaas_subscripti
 
 const PAID_STATUSES = new Set(["RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH"]);
 
+function refundedAt(payment: AsaasPayment) {
+  if (!Array.isArray(payment.refunds)) return undefined;
+  return payment.refunds
+    .filter((refund) => refund.status === "DONE" && refund.dateCreated)
+    .map((refund) => refund.dateCreated!.slice(0, 10))
+    .sort()
+    .at(-1);
+}
+
 async function findOne<T>(path: string): Promise<T | null> {
   const rows = await supabaseRequest<T[]>(path);
   return rows[0] ?? null;
@@ -246,6 +255,7 @@ async function upsertImplementationPayment(payment: AsaasPayment, link: PaymentL
     due_date: payment.dueDate ?? null,
     payment_date: payment.paymentDate ?? payment.clientPaymentDate ?? null,
     confirmed_date: payment.confirmedDate ?? null,
+    refunded_at: refundedAt(payment),
     raw_payload: payment,
   };
   const existing = await findOne<{ id: string }>(`/rest/v1/implementation_payments?select=id&asaas_payment_id=eq.${encodeURIComponent(payment.id)}`);
@@ -297,6 +307,7 @@ async function upsertOrphanImplementationPayment(payment: AsaasPayment, customer
     due_date: payment.dueDate ?? null,
     payment_date: payment.paymentDate ?? payment.clientPaymentDate ?? null,
     confirmed_date: payment.confirmedDate ?? null,
+    refunded_at: refundedAt(payment),
     raw_payload: payment,
   };
   const existing = await findOne<{ id: string }>(`/rest/v1/implementation_payments?select=id&asaas_payment_id=eq.${encodeURIComponent(payment.id)}`);
@@ -321,6 +332,7 @@ async function upsertPaymentRow(payment: AsaasPayment, paymentLinkId: string | n
     due_date: payment.dueDate ?? null,
     payment_date: payment.paymentDate ?? payment.clientPaymentDate ?? null,
     confirmed_date: payment.confirmedDate ?? null,
+    refunded_at: refundedAt(payment),
     raw_payload: payment,
   };
   const existing = await findOne<{ id: string }>(`/rest/v1/payments?select=id&asaas_payment_id=eq.${encodeURIComponent(payment.id)}`);

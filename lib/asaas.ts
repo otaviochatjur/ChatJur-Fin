@@ -55,6 +55,7 @@ export type AsaasPayment = {
   confirmedDate?: string | null;
   externalReference?: string | null;
   description?: string | null;
+  refunds?: Array<{ status?: string | null; dateCreated?: string | null }> | null;
 };
 
 export type AsaasCustomer = {
