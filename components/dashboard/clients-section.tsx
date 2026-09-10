@@ -84,6 +84,19 @@ function PaymentDates({ payment }: { payment: Pick<Payment, "payment_date" | "co
   );
 }
 
+function PaymentOrigin({ payment, linkById }: {
+  payment: Pick<Payment, "payment_link_id" | "asaas_payment_link_id"> & { source?: "SYSTEM" | "MANUAL" };
+  linkById: Map<string, PaymentLink>;
+}) {
+  if (payment.source === "MANUAL") return <p className="text-xs text-slate-500 dark:text-muted-foreground">Registrado manualmente · sem link no Asaas</p>;
+  const linked = payment.payment_link_id ? linkById.get(payment.payment_link_id) : null;
+  if (!payment.asaas_payment_link_id) {
+    return <p className="text-xs text-amber-700 dark:text-amber-300">Cobrança criada sem link no Asaas{linked ? ` · associada a ${linked.display_name}` : " · sem plano associado"}</p>;
+  }
+  if (linked) return <p className="truncate text-xs text-slate-500 dark:text-muted-foreground" title={linked.display_name}>Via link: {linked.display_name}</p>;
+  return <p className="text-xs text-amber-700 dark:text-amber-300">Link do Asaas ainda não cadastrado · {payment.asaas_payment_link_id}</p>;
+}
+
 type PaymentSyncRun = {
   action: "COMPLETED" | "FAILED";
   created_at: string;
@@ -367,7 +380,7 @@ export function ClientDialog({ customerId, customers, subscriptions, payments, i
   </Dialog>;
 }
 
-function ClientDetail({ customer, subscriptions, payments, implementationPayments, plans, actors, events, onChanged }: {
+function ClientDetail({ customer, subscriptions, payments, implementationPayments, plans, actors, links, events, onChanged }: {
   customer: Customer;
   subscriptions: Subscription[];
   payments: Payment[];
@@ -379,6 +392,19 @@ function ClientDetail({ customer, subscriptions, payments, implementationPayment
   onChanged: () => void;
 }) {
   const planById = new Map(plans.map((plan) => [plan.id, plan]));
+  const linkById = new Map(links.map((link) => [link.id, link]));
+  const linkedPaymentIds = [...new Set(payments.map((payment) => payment.payment_link_id).filter((id): id is string => Boolean(id)))];
+  const linksToReview = [...new Set([
+    ...linkedPaymentIds,
+    ...currentLinkedSubscriptions(subscriptions).map((subscription) => subscription.payment_link_id!).filter(Boolean),
+  ])];
+  const paymentsWithoutAssignedPlan = payments.filter((payment) => {
+    if (!payment.payment_link_id) return true;
+    const link = linkById.get(payment.payment_link_id);
+    return !link || (!link.plan_id && !link.custom_plan_id);
+  }).length;
+  const implementationsWithoutAssignedPlan = implementationPayments.filter((payment) => !payment.plan_id).length;
+  const createdWithoutAsaasLink = [...payments, ...implementationPayments].filter((payment) => !payment.asaas_payment_link_id && !("source" in payment && payment.source === "MANUAL")).length;
   const [status, setStatus] = useState<Customer["status"]>(customer.status);
   const [cancellationCategory, setCancellationCategory] = useState(customer.cancellation_category ?? "");
   const [cancellationReason, setCancellationReason] = useState(customer.cancellation_reason ?? "");
@@ -422,7 +448,9 @@ function ClientDetail({ customer, subscriptions, payments, implementationPayment
         {(customer.city || customer.state) && <p className="text-xs text-slate-400">{[customer.city, customer.state].filter(Boolean).join(" - ")}</p>}
       </div>
 
-      {currentLinkedSubscriptions(subscriptions).length > 1 && <div role="alert" className="rounded-xl bg-amber-500/10 p-4 text-sm text-amber-900 dark:text-amber-200"><p className="font-medium">Este cliente possui mais de um plano vinculado em uso.</p><p className="mt-1">Confira as assinaturas abaixo e desative o plano que não deve permanecer no painel. Essa ação mantém o histórico e não cancela cobranças no Asaas.</p></div>}
+      {linksToReview.length > 1 && <div role="alert" className="rounded-xl bg-amber-500/10 p-4 text-sm text-amber-900 dark:text-amber-200"><p className="font-medium">Regularização necessária: pagamentos associados a {linksToReview.length} links.</p><p className="mt-1">Confira as assinaturas abaixo e desative no painel o plano que não deve permanecer ativo. O histórico dos pagamentos e dos links será preservado.</p></div>}
+      {(paymentsWithoutAssignedPlan > 0 || implementationsWithoutAssignedPlan > 0) && <div role="alert" className="rounded-xl bg-amber-500/10 p-4 text-sm text-amber-900 dark:text-amber-200"><p className="font-medium">Há pagamentos sem plano definido.</p><p className="mt-1">{paymentsWithoutAssignedPlan + implementationsWithoutAssignedPlan} pagamento(s) precisam de regularização. Vincule o link ao plano em Planos e Links; para cobranças sem link, cadastre o plano manualmente no cliente.</p></div>}
+      {createdWithoutAsaasLink > 0 && <div className="rounded-xl bg-blue-500/10 p-4 text-sm text-blue-900 dark:text-blue-200"><p className="font-medium">{createdWithoutAsaasLink} cobrança(s) foram criadas sem link no Asaas.</p><p className="mt-1">A origem está identificada em cada pagamento abaixo.</p></div>}
       <CustomerTimeline subscriptions={subscriptions} customerId={customer.id} events={events} onChanged={onChanged} />
       <div className="space-y-2 rounded-xl border border-slate-200 dark:border-border p-3">
         <div className="flex items-center justify-between">
@@ -432,19 +460,22 @@ function ClientDetail({ customer, subscriptions, payments, implementationPayment
         {subscriptions.length === 0 && !addingPlan && <p className="text-sm text-slate-500 dark:text-muted-foreground">Nenhuma assinatura registrada. Se este cliente é cobrado fora do Asaas (ex: veio da planilha e ainda não pagou por link), cadastre o plano manualmente para que ele entre no MRR.</p>}
         {addingPlan && <ManualSubscriptionForm customerId={customer.id} onDone={() => { setAddingPlan(false); onChanged(); }} onCancel={() => setAddingPlan(false)} />}
         {subscriptions.map((subscription) => (
-          <SubscriptionRow key={subscription.id} subscription={subscription} customizations={activeCustomizations(subscription.id, customer.id, events)} onChanged={onChanged} />
+          <SubscriptionRow key={subscription.id} subscription={subscription} link={subscription.payment_link_id ? linkById.get(subscription.payment_link_id) : undefined} customizations={activeCustomizations(subscription.id, customer.id, events)} onChanged={onChanged} />
         ))}
       </div>
 
       <div className="space-y-2 rounded-xl border border-slate-200 dark:border-border p-3">
         <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500 dark:text-muted-foreground">Pagamentos ({payments.length})</p>
         {payments.length === 0 && <p className="text-sm text-slate-500 dark:text-muted-foreground">Nenhum pagamento registrado ainda.</p>}
-        <div className="max-h-48 space-y-1.5 overflow-y-auto">
-          {payments.slice(0, 20).map((payment) => (
-            <div key={payment.id} className="flex items-center justify-between gap-2 text-sm">
-              <span className={isPaidStatus(payment.status) ? "text-emerald-700 dark:text-emerald-300" : "text-slate-500 dark:text-muted-foreground"}>{payment.status}</span>
-              <PaymentDates payment={payment} />
-              <span className="font-medium">{money.format(payment.value)}</span>
+        <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+          {payments.map((payment) => (
+            <div key={payment.id} className="rounded-lg bg-slate-50/80 px-3 py-2 dark:bg-muted/40">
+              <div className="flex items-center justify-between gap-2 text-sm">
+                <span className={isPaidStatus(payment.status) ? "text-emerald-700 dark:text-emerald-300" : "text-slate-500 dark:text-muted-foreground"}>{payment.status}</span>
+                <PaymentDates payment={payment} />
+                <span className="font-medium">{money.format(payment.value)}</span>
+              </div>
+              <PaymentOrigin payment={payment} linkById={linkById} />
             </div>
           ))}
         </div>
@@ -465,11 +496,11 @@ function ClientDetail({ customer, subscriptions, payments, implementationPayment
             onCancel={() => setAddingImplementationPayment(false)}
           />
         )}
-        <div className="max-h-48 space-y-1.5 overflow-y-auto">
-          {implementationPayments.slice(0, 20).map((payment) => {
+        <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+          {implementationPayments.map((payment) => {
             const plan = payment.plan_id ? planById.get(payment.plan_id) : undefined;
             return (
-            <div key={payment.id} className="text-sm">
+            <div key={payment.id} className="rounded-lg bg-violet-100/40 px-3 py-2 text-sm dark:bg-violet-950/20">
               <div className="flex items-center justify-between gap-2">
                 <span className={isPaidStatus(payment.status) ? "text-emerald-700 dark:text-emerald-300" : "text-slate-500 dark:text-muted-foreground"}>{payment.status}</span>
                 <PaymentDates payment={payment} />
@@ -480,6 +511,7 @@ function ClientDetail({ customer, subscriptions, payments, implementationPayment
                 {payment.source === "MANUAL" && <Badge variant="outline" className="shrink-0 text-[10px] border-slate-200 dark:border-border bg-slate-50 dark:bg-muted text-slate-500 dark:text-muted-foreground">Manual</Badge>}
                 <span className="truncate">{payment.description}</span>
               </p>
+              <PaymentOrigin payment={payment} linkById={linkById} />
             </div>
             );
           })}
@@ -518,7 +550,7 @@ function ClientDetail({ customer, subscriptions, payments, implementationPayment
 }
 
 /** One subscription card with an inline, auto-saving status editor — lets the operator manually confirm ACTIVE/FROZEN/CANCELLED for subscriptions that came out of the Set/2026 reset with no status at all. */
-function SubscriptionRow({ subscription, customizations, onChanged }: { subscription: Subscription; customizations: ActiveCustomization[]; onChanged: () => void }) {
+function SubscriptionRow({ subscription, link, customizations, onChanged }: { subscription: Subscription; link?: PaymentLink; customizations: ActiveCustomization[]; onChanged: () => void }) {
   const [saving, setSaving] = useState(false);
   async function setStatus(status: "ACTIVE" | "FROZEN" | "CANCELLED") {
     if (saving || status === subscription.status) return;
@@ -549,6 +581,8 @@ function SubscriptionRow({ subscription, customizations, onChanged }: { subscrip
       </div>
       {subscription.status !== "CANCELLED" && <Button variant="ghost" size="sm" disabled={saving} onClick={() => setStatus("CANCELLED")}>Desativar no painel</Button>}
       <p className="text-xs text-slate-500 dark:text-muted-foreground">{subscription.billing_period === "ANNUAL" ? "Anual" : "Mensal"} · {money.format(subscription.value)}{subscription.source === "LEGACY_IMPORT" ? " · importado" : subscription.source === "MANUAL" ? " · cadastrado manualmente" : ""}</p>
+      {subscription.payment_link_id && <p className="mt-1 truncate text-xs text-slate-500 dark:text-muted-foreground" title={link?.display_name}>{link ? `Link: ${link.display_name}` : "Link de pagamento não encontrado na base"}</p>}
+      {subscription.payment_link_id && subscription.display_plan_name === "—" && <p className="mt-1 text-xs font-medium text-amber-700 dark:text-amber-300">Este link ainda não está vinculado a um plano.</p>}
       {subscription.display_actor_label ? (
         <p className="mt-1 text-xs font-medium text-[#3b82f6]">{subscription.display_actor_label}</p>
       ) : (

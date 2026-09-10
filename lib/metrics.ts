@@ -188,11 +188,10 @@ export type Subscription = {
   value: number;
   payment_method: string | null;
   installments: number | null;
-  // Nullable on purpose: after the operator-driven reset (Sep/2026) every
-  // subscription starts with no status until manually confirmed, instead of
-  // inheriting a possibly-stale ACTIVE/FROZEN/CANCELLED from before the
-  // switch to manual operation. Sync (`lib/payment-sync.ts`) still sets it
-  // to ACTIVE automatically whenever a real paid payment lands.
+  // Nullable when the payment history does not prove that the subscription
+  // is active yet. Sync only sets ACTIVE after a real paid payment; pending,
+  // overdue and refunded states never imply FROZEN. FROZEN/CANCELLED are
+  // explicit operator decisions.
   status: "ACTIVE" | "CANCELLED" | "FROZEN" | null;
   asaas_subscription_id: string | null;
   asaas_installment_id: string | null;
@@ -206,6 +205,7 @@ export type Payment = {
   id: string;
   subscription_id: string | null;
   payment_link_id: string | null;
+  asaas_payment_link_id?: string | null;
   customer_id: string | null;
   asaas_payment_id: string;
   status: string;
@@ -236,6 +236,7 @@ export type ImplementationPayment = {
   customer_id: string | null;
   actor_id: string | null;
   payment_link_id: string | null;
+  asaas_payment_link_id?: string | null;
   plan_id: string | null;
   /** NULL when `source === "MANUAL"` — no Asaas payment behind it. */
   asaas_payment_id: string | null;

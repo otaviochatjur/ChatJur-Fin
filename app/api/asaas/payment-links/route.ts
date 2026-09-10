@@ -1,6 +1,6 @@
 import { asaasRequest, getAsaasConfig } from "@/lib/asaas";
 import { isOneTimePlanKind, isPaidStatus, type Plan } from "@/lib/metrics";
-import { supabaseRequest } from "@/lib/supabase-server";
+import { reclassifyPaymentLinkAsOneTime, supabaseRequest } from "@/lib/supabase-server";
 
 type PaymentLinkRequest = { partnerId?: string; partnerName?: string; planId?: string; customPlanId?: string; planName?: string; description?: string; billingPeriod?: "MONTHLY" | "ANNUAL"; priceVersion?: string; priceVersionId?: string; value?: number; maxInstallments?: number };
 
@@ -116,6 +116,7 @@ export async function PATCH(request: Request) {
     if (!current) return Response.json({ error: "Link não encontrado." }, { status: 404 });
 
     const body: Record<string, unknown> = {};
+    let selectedPlanKind: Plan["kind"] | null = null;
     if (payload.actorId !== undefined) body.actor_id = payload.actorId || null;
     if (payload.planId !== undefined) {
       body.plan_id = payload.planId || null;
@@ -125,8 +126,10 @@ export async function PATCH(request: Request) {
       // usa para rotear o pagamento para implementation_payments em vez de
       // subscriptions.
       if (payload.planId) {
-        const [plan] = await supabaseRequest<{ kind: Plan["kind"] }[]>(`/rest/v1/plans?id=eq.${encodeURIComponent(payload.planId)}&select=kind`);
+        const [plan] = await supabaseRequest<{ kind: Plan["kind"]; billing_period: "MONTHLY" | "ANNUAL" | "ONE_TIME" }[]>(`/rest/v1/plans?id=eq.${encodeURIComponent(payload.planId)}&select=kind,billing_period`);
+        selectedPlanKind = plan?.kind ?? null;
         if (isOneTimePlanKind(plan?.kind)) body.billing_period = "ONE_TIME";
+        else if (plan?.billing_period === "MONTHLY" || plan?.billing_period === "ANNUAL") body.billing_period = plan.billing_period;
       }
     }
 
@@ -171,13 +174,23 @@ export async function PATCH(request: Request) {
     // importa de verdade: o cálculo de repasse por plano (findCommissionRate)
     // e a quebra de receita por plano (Receita e MRR) dependem de
     // subscriptions.plan_id, não do nome do link — daí o backfill imediato.
-    let backfilled: { subscriptions: number; implementationPayments: number } | null = null;
+    let backfilled: { subscriptions: number; implementationPayments: number; movedPayments?: number; removedSubscriptions?: number } | null = null;
     if (body.plan_id !== undefined) {
-      const [subs, impl] = await Promise.all([
-        supabaseRequest<unknown[]>(`/rest/v1/subscriptions?payment_link_id=eq.${encodeURIComponent(payload.id)}`, { method: "PATCH", prefer: "return=representation", body: { plan_id: body.plan_id } }).catch(() => []),
-        supabaseRequest<unknown[]>(`/rest/v1/implementation_payments?payment_link_id=eq.${encodeURIComponent(payload.id)}`, { method: "PATCH", prefer: "return=representation", body: { plan_id: body.plan_id } }).catch(() => []),
-      ]);
-      backfilled = { subscriptions: subs.length, implementationPayments: impl.length };
+      if (payload.planId && isOneTimePlanKind(selectedPlanKind)) {
+        const moved = await reclassifyPaymentLinkAsOneTime<{ movedPayments: number; removedSubscriptions: number }>(payload.id, payload.planId);
+        backfilled = {
+          subscriptions: 0,
+          implementationPayments: moved.movedPayments,
+          movedPayments: moved.movedPayments,
+          removedSubscriptions: moved.removedSubscriptions,
+        };
+      } else {
+        const [subs, impl] = await Promise.all([
+          supabaseRequest<unknown[]>(`/rest/v1/subscriptions?payment_link_id=eq.${encodeURIComponent(payload.id)}`, { method: "PATCH", prefer: "return=representation", body: { plan_id: body.plan_id } }).catch(() => []),
+          supabaseRequest<unknown[]>(`/rest/v1/implementation_payments?payment_link_id=eq.${encodeURIComponent(payload.id)}`, { method: "PATCH", prefer: "return=representation", body: { plan_id: body.plan_id } }).catch(() => []),
+        ]);
+        backfilled = { subscriptions: subs.length, implementationPayments: impl.length };
+      }
     }
 
     return Response.json({ record, backfilled });

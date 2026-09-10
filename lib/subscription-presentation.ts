@@ -21,7 +21,11 @@ export function presentSubscription(subscription: SubscriptionWithRelations): Su
   const actor = relation?.commercial_actors;
   return {
     ...subscription,
-    display_plan_name: plan?.name ?? "—",
+    // Linked subscriptions always inherit the plan currently bound to the
+    // payment link. Only a plan explicitly registered by the operator may
+    // use its own typed name; an Asaas/link label is never presented as the
+    // product plan.
+    display_plan_name: plan?.name ?? (subscription.source === "MANUAL" ? subscription.plan_name_raw ?? "—" : "—"),
     display_actor_id: actor?.id ?? null,
     display_actor_label: actor ? `${actorCategoryLabel(actor)} · ${actor.name}` : null,
   };

@@ -17,7 +17,7 @@ type PaymentLinkRow = {
   plan_kind: Plan["kind"] | null;
 };
 type CustomerRow = StoredAsaasCustomer;
-type SubscriptionRow = { id: string; status: string; status_manually_set?: boolean; asaas_subscription_id: string | null; asaas_installment_id: string | null };
+type SubscriptionRow = { id: string; status: string | null; status_manually_set?: boolean; asaas_subscription_id: string | null; asaas_installment_id: string | null };
 /** Full shape needed to keep tracking a subscription whose payments stopped carrying a `paymentLink` (see `resolveOrphanSubscription`). */
 type SubscriptionFullRow = SubscriptionRow & {
   customer_id: string;
@@ -222,7 +222,10 @@ async function resolveSubscription(payment: AsaasPayment, link: PaymentLinkRow, 
       // regardless of how the customer chose to split it.
       value: link.value,
       payment_method: payment.billingType ?? null,
-      status: PAID_STATUSES.has(payment.status) ? "ACTIVE" : "FROZEN",
+      // A successful payment proves the subscription is active. Any other
+      // financial state (pending, overdue or refunded) does not prove it is
+      // frozen; FROZEN is reserved for an explicit operator decision.
+      status: PAID_STATUSES.has(payment.status) ? "ACTIVE" : null,
       asaas_subscription_id: payment.subscription ?? null,
       asaas_installment_id: payment.installment ?? null,
       started_at: payment.paymentDate ?? payment.dueDate ?? new Date().toISOString().slice(0, 10),
@@ -245,6 +248,7 @@ async function upsertImplementationPayment(payment: AsaasPayment, link: PaymentL
     customer_id: customer.id,
     actor_id: link.actor_id,
     payment_link_id: link.id,
+    asaas_payment_link_id: payment.paymentLink ?? null,
     plan_id: link.plan_id,
     asaas_payment_id: payment.id,
     description: link.display_name,
@@ -297,6 +301,7 @@ async function upsertOrphanImplementationPayment(payment: AsaasPayment, customer
   const body = {
     customer_id: customer.id,
     payment_link_id: null,
+    asaas_payment_link_id: payment.paymentLink ?? null,
     plan_id: null,
     asaas_payment_id: payment.id,
     description: payment.description || "Implantação/consultoria (sem link)",
@@ -319,10 +324,11 @@ async function upsertOrphanImplementationPayment(payment: AsaasPayment, customer
   return "created" as const;
 }
 
-async function upsertPaymentRow(payment: AsaasPayment, paymentLinkId: string | null, customer: CustomerRow, subscription: SubscriptionRow) {
+async function upsertPaymentRow(payment: AsaasPayment, paymentLinkId: string | null, customer: CustomerRow, subscription: SubscriptionRow | null) {
   const body = {
-    subscription_id: subscription.id,
+    subscription_id: subscription?.id ?? null,
     payment_link_id: paymentLinkId,
+    asaas_payment_link_id: payment.paymentLink ?? null,
     customer_id: customer.id,
     asaas_payment_id: payment.id,
     status: payment.status,
@@ -498,7 +504,14 @@ export async function syncAsaasPayment(payment: AsaasPayment) {
   }
 
   const existingSubscription = await resolveOrphanSubscription(payment, customer);
-  if (!existingSubscription) return { result: "skipped" as const, reason: "no paymentLink and no existing subscription to attach this payment to" };
+  if (!existingSubscription) {
+    // Preserve every Asaas charge for a known customer even when there is no
+    // payment link and therefore no safe way to infer a plan. The client
+    // modal exposes it as "sem link/sem plano" so the operator can regularize
+    // it instead of losing the payment from view.
+    const result = await upsertPaymentRow(payment, null, customer, null);
+    return { result, customerId: customer.id, subscriptionId: null, linkId: null, unassigned: true as const };
+  }
 
   const subscription = await migrateOrphanSubscription(existingSubscription, payment);
   const result = await upsertPaymentRow(payment, subscription.payment_link_id, customer, subscription);

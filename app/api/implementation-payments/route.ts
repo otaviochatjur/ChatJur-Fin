@@ -13,7 +13,7 @@ export async function GET(request: Request) {
   try {
     const params = new URL(request.url).searchParams;
     const filters = [
-      "select=id,customer_id,actor_id,payment_link_id,plan_id,asaas_payment_id,source,description,status,value,net_value,billing_type,due_date,payment_date,confirmed_date,refunded_at,created_at",
+      "select=id,customer_id,actor_id,payment_link_id,plan_id,asaas_payment_id,asaas_payment_link_id,source,description,status,value,net_value,billing_type,due_date,payment_date,confirmed_date,refunded_at,created_at",
       params.get("customerId") ? `customer_id=eq.${encodeURIComponent(params.get("customerId")!)}` : null,
       params.get("actorId") ? `actor_id=eq.${encodeURIComponent(params.get("actorId")!)}` : null,
       "order=created_at.desc",

@@ -36,6 +36,21 @@ export async function mergeCustomerRecords<T>(keepId: string, mergeIds: string[]
   return data as T;
 }
 
+/** Atomically moves recurring-ledger rows when a link is classified as implantation/consulting. */
+export async function reclassifyPaymentLinkAsOneTime<T>(linkId: string, planId: string): Promise<T> {
+  const tenant = await currentTenant();
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!key || !process.env.SUPABASE_URL) throw new Error("Supabase não configurado.");
+  const response = await fetch(`${process.env.SUPABASE_URL}/rest/v1/rpc/reclassify_payment_link_as_one_time`, {
+    method: "POST",
+    headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ p_tenant: tenant.id, p_link: linkId, p_plan: planId }),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.message ?? "Não foi possível classificar os pagamentos como implantação/consultoria.");
+  return data as T;
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

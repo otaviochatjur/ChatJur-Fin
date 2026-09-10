@@ -118,11 +118,56 @@ test("payment sync records refund dates without reactivating a manually disabled
       assert.equal(mutations.filter(m => m.table === "subscriptions").length, 0);
       assert.equal(mutations.filter(m => m.table === "payments").length, 1);
       assert.equal(mutations.find(m => m.table === "payments").body.refunded_at, "2026-08-01");
+      assert.equal(mutations.find(m => m.table === "payments").body.asaas_payment_link_id, linked ? "asaas-link" : null);
     }
   } finally {
     globalThis.fetch = previousFetch;
     if (oldUrl === undefined) delete process.env.SUPABASE_URL; else process.env.SUPABASE_URL = oldUrl;
     if (oldKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY; else process.env.SUPABASE_SERVICE_ROLE_KEY = oldKey;
+  }
+});
+
+test("pending or refunded payments never freeze a subscription automatically", async () => {
+  const { withWebhookTenant } = await vite.ssrLoadModule("/lib/tenant-server.ts");
+  const { syncAsaasPayment } = await vite.ssrLoadModule("/lib/payment-sync.ts");
+  const previousFetch = globalThis.fetch;
+  const previous = { ...process.env };
+  Object.assign(process.env, { SUPABASE_URL: "https://db.invalid", SUPABASE_SERVICE_ROLE_KEY: "test" });
+  try {
+    for (const paymentStatus of ["PENDING", "REFUNDED"]) {
+      let createdSubscription;
+      globalThis.fetch = async (input, options = {}) => {
+        const url = new URL(input);
+        const table = url.pathname.split("/").at(-1);
+        if ((options.method ?? "GET") === "GET") {
+          if (table === "asaas_customer_exclusions") return Response.json([]);
+          if (table === "payment_links") return Response.json([{ id: "link", actor_id: null, plan_id: "plan", custom_plan_id: null, display_name: "Link Asaas", billing_period: "MONTHLY", value: 100, plans: { kind: "RECURRING" } }]);
+          if (table === "customers") return Response.json([{ id: "customer", asaas_customer_id: "asaas-customer", acquisition_actor_id: null, office_name: "Cliente", responsible_name: null, email: "cliente@example.com", phone: null, signed_at: null, status: "ACTIVE" }]);
+          if (table === "subscriptions" || table === "payments") return Response.json([]);
+        }
+        const body = JSON.parse(options.body);
+        if (table === "subscriptions") {
+          createdSubscription = body;
+          return Response.json([{ id: `subscription-${paymentStatus}`, ...body }]);
+        }
+        if (table === "payments") return Response.json([]);
+        throw new Error(`Unexpected request ${table}`);
+      };
+      await withWebhookTenant({ id: `tenant-${paymentStatus.toLowerCase()}`, legacy: false }, () => syncAsaasPayment({
+        id: `pay-${paymentStatus}`,
+        customer: "asaas-customer",
+        subscription: `asaas-sub-${paymentStatus}`,
+        paymentLink: "asaas-link",
+        value: 100,
+        status: paymentStatus,
+      }));
+      assert.equal(createdSubscription.status, null);
+    }
+  } finally {
+    globalThis.fetch = previousFetch;
+    for (const key of ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"]) {
+      if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key];
+    }
   }
 });
 
@@ -169,8 +214,8 @@ test("a payment without paymentLink still imports a payer listed in Base de Clie
       value: 5,
       status: "RECEIVED",
     }));
-    assert.equal(result.result, "skipped");
-    assert.match(result.reason, /no existing subscription/);
+    assert.equal(result.result, "created");
+    assert.equal(result.unassigned, true);
     const customer = mutations.find(row => row.table === "customers").body;
     assert.equal(customer.email, "davilessa2002@gmail.com");
     assert.equal(customer.office_name, "DAVI LESSA");
@@ -180,6 +225,11 @@ test("a payment without paymentLink still imports a payer listed in Base de Clie
     const alias = mutations.find(row => row.table === "customer_asaas_aliases").body;
     assert.equal(alias.customer_id, "customer-davi");
     assert.equal(alias.asaas_customer_id, "asaas-new");
+    const payment = mutations.find(row => row.table === "payments").body;
+    assert.equal(payment.customer_id, "customer-davi");
+    assert.equal(payment.subscription_id, null);
+    assert.equal(payment.payment_link_id, null);
+    assert.equal(payment.asaas_payment_link_id, null);
   } finally {
     globalThis.fetch = previousFetch;
     for (const key of ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "ASAAS_API_KEY", "ASAAS_BASE_URL", "CLIENTS_SHEET_WEBHOOK_URL", "CLIENTS_SHEET_WEBHOOK_AUTH"]) {
