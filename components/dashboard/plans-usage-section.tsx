@@ -733,7 +733,7 @@ const LinkRow = memo(function LinkRow({
       {showValue && <TableCell className="text-right text-sm">{money.format(link.value)}<span className="ml-1 text-xs text-slate-400">{link.billing_period === "ANNUAL" ? "/ano" : link.billing_period === "ONE_TIME" ? " · taxa única" : "/mês"}</span></TableCell>}
       {showSource && <TableCell className="text-xs text-slate-500 dark:text-muted-foreground">{link.source === "ASAAS_SYNC" ? "Importado do Asaas" : "Gerado aqui"}</TableCell>}
       {showStatus && <TableCell>{link.status === "INACTIVE" ? <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-600 dark:border-border dark:bg-muted dark:text-muted-foreground"><span className="mr-1.5 size-1.5 rounded-full bg-slate-400" />Arquivado</Badge> : <StatusBadge status={link.status} />}{link.asaas_snapshot && <p className="mt-1 text-xs text-muted-foreground" title={link.asaas_synced_at ? `Consultado em ${new Date(link.asaas_synced_at).toLocaleString("pt-BR")}` : undefined}>Asaas: {link.asaas_snapshot.deleted ? "Removido" : link.asaas_snapshot.active === false ? "Inativo" : "Ativo"}</p>}</TableCell>}
-      <TableCell className="flex justify-end gap-1.5">
+      <TableCell className="flex justify-start gap-1.5">
         {dirty && (
           <Button size="sm" disabled={confirming} onClick={() => onConfirm(link.id)} className="bg-[#3a5d9d] text-white hover:bg-[#2c4a80]">
             {confirming ? "Vinculando…" : "Vincular"}
