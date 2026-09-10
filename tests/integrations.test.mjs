@@ -291,3 +291,69 @@ test("generated Asaas links use the entered description and a one-business-day b
     }
   }
 });
+
+test("payment links are archived locally before their Asaas availability can change", async () => {
+  const { withWebhookTenant } = await vite.ssrLoadModule("/lib/tenant-server.ts");
+  const { PATCH } = await vite.ssrLoadModule("/app/api/asaas/payment-links/route.ts");
+  const previousFetch = globalThis.fetch;
+  const previous = { ...process.env };
+  Object.assign(process.env, {
+    SUPABASE_URL: "https://db.invalid",
+    SUPABASE_SERVICE_ROLE_KEY: "service-test",
+    ASAAS_API_KEY: "asaas-test",
+    ASAAS_BASE_URL: "https://asaas.invalid/v3",
+  });
+  const linkId = "11111111-1111-4111-8111-111111111111";
+  let currentStatus = "ACTIVE";
+  let asaasCalls = 0;
+  let lastPatch;
+  globalThis.fetch = async (input, options = {}) => {
+    const url = new URL(input);
+    if (url.host === "asaas.invalid") {
+      asaasCalls += 1;
+      assert.equal(url.pathname, "/v3/paymentLinks/link_1");
+      assert.deepEqual(JSON.parse(options.body), { active: false });
+      return Response.json({ id: "link_1", active: false });
+    }
+    if (url.host === "db.invalid") {
+      const table = url.pathname.split("/").at(-1);
+      if (table === "nexo_integrations") return Response.json([]);
+      if (table === "payment_links" && (options.method ?? "GET") === "GET") {
+        return Response.json([{ id: linkId, actor_id: null, plan_id: "plan-1", status: currentStatus, asaas_payment_link_id: "link_1", asaas_snapshot: { active: true } }]);
+      }
+      if (table === "payment_links" && options.method === "PATCH") {
+        lastPatch = JSON.parse(options.body);
+        currentStatus = lastPatch.status ?? currentStatus;
+        return Response.json([{ id: linkId, ...lastPatch }]);
+      }
+    }
+    throw new Error(`Unexpected request ${url}`);
+  };
+  const tenant = { id: "tenant-a", owner_user_id: null, reserved_email: null, legacy: true };
+  const call = (body) => withWebhookTenant(tenant, () => PATCH(new Request("http://localhost/api/asaas/payment-links", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: linkId, ...body }),
+  })));
+  try {
+    const blocked = await call({ asaasActive: false });
+    assert.equal(blocked.status, 409);
+    assert.equal(asaasCalls, 0);
+
+    const archived = await call({ status: "INACTIVE" });
+    assert.equal(archived.status, 200);
+    assert.equal(lastPatch.status, "INACTIVE");
+    assert.equal(asaasCalls, 0, "archiving must not disable the Asaas link");
+
+    const disabled = await call({ asaasActive: false });
+    assert.equal(disabled.status, 200);
+    assert.equal(asaasCalls, 1);
+    assert.equal(lastPatch.asaas_snapshot.active, false);
+    assert.equal(lastPatch.status, undefined, "remote availability must not unarchive the link");
+  } finally {
+    globalThis.fetch = previousFetch;
+    for (const key of ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "ASAAS_API_KEY", "ASAAS_BASE_URL"]) {
+      if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key];
+    }
+  }
+});

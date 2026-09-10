@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Copy, Link2, Link2Off, MoreHorizontal, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Archive, Copy, Link2, MoreHorizontal, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -396,14 +396,14 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
     toast.success("Link copiado.");
   }
 
-  const [deactivatingLinks, setDeactivatingLinks] = useState(false);
+  const [archivingLinks, setArchivingLinks] = useState(false);
 
-  /** Deactivates every ACTIVE link of this actor at once — e.g. when a partner/embaixador leaves the program. Mirrors each link onto Asaas too (see `app/api/asaas/payment-links/bulk-status`). Existing subscriptions/payments already made through those links are untouched. */
-  async function deactivateAllLinks() {
-    const activeCount = links.filter((link) => link.status === "ACTIVE").length;
-    if (activeCount === 0) return;
-    if (!window.confirm(`Desativar todos os ${activeCount} link(s) ativo(s) de ${actor.name}? Eles deixam de aceitar pagamento no Asaas também — assinaturas já existentes não são afetadas.`)) return;
-    setDeactivatingLinks(true);
+  /** Archives every visible link of this actor locally. Remote availability can only be changed later from the archived-links view. */
+  async function archiveAllLinks() {
+    const availableCount = links.filter((link) => link.status !== "INACTIVE").length;
+    if (availableCount === 0) return;
+    if (!window.confirm(`Arquivar todos os ${availableCount} link(s) de ${actor.name}? Eles continuarão disponíveis no Asaas.`)) return;
+    setArchivingLinks(true);
     try {
       const response = await fetch("/api/asaas/payment-links/bulk-status", {
         method: "POST",
@@ -411,13 +411,13 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
         body: JSON.stringify({ actorId: actor.id, status: "INACTIVE" }),
       });
       const data = await response.json();
-      if (!response.ok) { toast.error(data.error ?? "Não foi possível desativar os links."); return; }
+      if (!response.ok) { toast.error(data.error ?? "Não foi possível arquivar os links."); return; }
       const failedNote = data.failed.length > 0 ? ` ${data.failed.length} falharam: ${data.failed.join(", ")}.` : "";
-      toast.success(`${data.succeeded}/${data.total} link(s) desativado(s) (no Asaas também).${failedNote}`);
+      toast.success(`${data.succeeded}/${data.total} link(s) arquivado(s).${failedNote}`);
       await loadDetail();
       onChanged();
     } finally {
-      setDeactivatingLinks(false);
+      setArchivingLinks(false);
     }
   }
 
@@ -612,9 +612,9 @@ export function ActorWorkspace({ actor, plans, metrics, onChanged }: { actor: Co
                   <Button variant="ghost" size="sm" disabled={syncingPayments} onClick={syncPayments} className="h-7 gap-1.5 text-xs text-[#3b82f6]">
                     <RefreshCw className={`size-3.5 ${syncingPayments ? "animate-spin" : ""}`} />{syncingPayments ? "Sincronizando…" : "Sincronizar pagamentos"}
                   </Button>
-                  {links.some((link) => link.status === "ACTIVE") && (
-                    <Button variant="ghost" size="sm" disabled={deactivatingLinks} onClick={deactivateAllLinks} className="h-7 gap-1.5 text-xs text-red-600 dark:text-red-300 hover:text-red-700 dark:hover:text-red-300">
-                      <Link2Off className="size-3.5" />{deactivatingLinks ? "Desativando…" : "Desativar todos os links"}
+                  {links.some((link) => link.status !== "INACTIVE") && (
+                    <Button variant="ghost" size="sm" disabled={archivingLinks} onClick={archiveAllLinks} className="h-7 gap-1.5 text-xs text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white">
+                      <Archive className="size-3.5" />{archivingLinks ? "Arquivando…" : "Arquivar todos os links"}
                     </Button>
                   )}
                 </div>

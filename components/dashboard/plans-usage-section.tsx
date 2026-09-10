@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link2Off } from "lucide-react";
+import { Archive } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { StatusBadge } from "@/components/dashboard/status-badge";
 import { ColumnVisibilityMenu, ResizableTh, useTableSort, useColumnVisibility, useColumnWidths, type ColumnDef } from "@/components/dashboard/table-toolbar";
 import { cn } from "@/lib/utils";
-import { isOneTimePlanKind, money, planBadgeClass, planKindLabels, type CommercialActor, type PaymentLink, type Plan } from "@/lib/metrics";
+import { isOneTimePlanKind, money, planBadgeClass, planKindLabels, type CommercialActor, type PaymentLink, type Plan, type Subscription } from "@/lib/metrics";
 
 type ComboOption = { value: string; label: string };
 
@@ -35,7 +35,7 @@ function EntitySelect({ value, onValueChange, options, placeholder, className }:
 }
 
 const linkFilters = ["ALL", "PENDING", "ACTIVE", "INACTIVE"] as const;
-const linkFilterLabels: Record<(typeof linkFilters)[number], string> = { ALL: "Todos", PENDING: "Pendentes", ACTIVE: "Vinculados", INACTIVE: "Inativos" };
+const linkFilterLabels: Record<(typeof linkFilters)[number], string> = { ALL: "Todos", PENDING: "Pendentes", ACTIVE: "Vinculados", INACTIVE: "Arquivados" };
 
 const planKindFilters = ["ALL", "RECURRING", "IMPLEMENTATION", "CONSULTING"] as const;
 const planKindFilterLabels: Record<(typeof planKindFilters)[number], string> = { ALL: "Todos", RECURRING: "Planos", IMPLEMENTATION: "Implantações", CONSULTING: "Consultorias" };
@@ -52,10 +52,11 @@ const planColumns: ColumnDef<"kind" | "billingPeriod" | "value" | "installments"
   { key: "status", label: "Status", defaultWidth: 110 },
 ];
 
-const linkColumns: ColumnDef<"kind" | "actor" | "plan" | "value" | "source" | "status">[] = [
+const linkColumns: ColumnDef<"kind" | "actor" | "plan" | "subscriptions" | "value" | "source" | "status">[] = [
   { key: "kind", label: "Tipo", defaultWidth: 130 },
   { key: "actor", label: "Ator", defaultWidth: 190 },
   { key: "plan", label: "Plano", defaultWidth: 190 },
+  { key: "subscriptions", label: "Assinaturas", defaultWidth: 115 },
   { key: "value", label: "Valor", defaultWidth: 130 },
   { key: "source", label: "Origem", defaultWidth: 150 },
   { key: "status", label: "Status", defaultWidth: 110 },
@@ -66,16 +67,16 @@ function linkKind(link: PaymentLink, planById: Map<string, Plan>): Plan["kind"] 
   return (link.plan_id && planById.get(link.plan_id)?.kind) || "RECURRING";
 }
 
-export function PlansUsageSection({ links, actors, onChanged }: { links: PaymentLink[]; actors: CommercialActor[]; onChanged: () => void }) {
+export function PlansUsageSection({ links, actors, subscriptions, onChanged }: { links: PaymentLink[]; actors: CommercialActor[]; subscriptions: Subscription[]; onChanged: () => void }) {
   return (
     <div className="space-y-5">
       <PlansPanel links={links} onChanged={onChanged} />
-      <LinksPanel links={links} actors={actors} onChanged={onChanged} />
+      <LinksPanel links={links} actors={actors} subscriptions={subscriptions} onChanged={onChanged} />
     </div>
   );
 }
 
-/** Bulk ACTIVE/INACTIVE toggle for every link bound to a plan or to an actor — used both by the plan catalog's "Desativar links vinculados" and by the actor workspace's equivalent action. Mirrors each link onto Asaas (see `app/api/asaas/payment-links/bulk-status`). */
+/** Archives/unarchives every link bound to a plan or actor without changing its availability at Asaas. */
 async function bulkSetLinkStatus(target: { planId?: string; actorId?: string }, status: "ACTIVE" | "INACTIVE") {
   const response = await fetch("/api/asaas/payment-links/bulk-status", {
     method: "POST",
@@ -86,7 +87,7 @@ async function bulkSetLinkStatus(target: { planId?: string; actorId?: string }, 
   if (!response.ok) { toast.error(data.error ?? "Não foi possível atualizar os links."); return false; }
   if (data.total === 0) { toast.info("Nenhum link para atualizar."); return false; }
   const failedNote = data.failed.length > 0 ? ` ${data.failed.length} falharam: ${data.failed.join(", ")}.` : "";
-  toast.success(`${data.succeeded}/${data.total} link(s) ${status === "INACTIVE" ? "desativado(s)" : "reativado(s)"} (no Asaas também).${failedNote}`);
+  toast.success(`${data.succeeded}/${data.total} link(s) ${status === "INACTIVE" ? "arquivado(s)" : "desarquivado(s)"}.${failedNote}`);
   return true;
 }
 
@@ -248,7 +249,7 @@ function PlansPanel({ links, onChanged }: { links: PaymentLink[]; onChanged: () 
               onSave={(patch) => savePlanEdit(plan, patch)}
               onToggleStatus={() => toggleStatus(plan)}
               onDeactivateLinks={async () => {
-                if (!window.confirm(`Desativar todos os ${activeLinkCountByPlan.get(plan.id) ?? 0} link(s) ativo(s) do plano "${plan.name}"? Eles deixam de aceitar pagamento no Asaas também — assinaturas já existentes não são afetadas.`)) return;
+                if (!window.confirm(`Arquivar todos os ${activeLinkCountByPlan.get(plan.id) ?? 0} link(s) vinculados ao plano "${plan.name}"? Eles continuarão disponíveis no Asaas.`)) return;
                 if (await bulkSetLinkStatus({ planId: plan.id }, "INACTIVE")) onChanged();
               }}
             />
@@ -307,8 +308,8 @@ function PlanRow({ plan, activeLinks, editing, visibleColumns, onEdit, onCancelE
         <Button size="sm" variant="ghost" onClick={onEdit}>Editar</Button>
         <Button size="sm" variant="outline" onClick={onToggleStatus}>{plan.status === "ACTIVE" ? "Desativar" : "Ativar"}</Button>
         {activeLinks > 0 && (
-          <Button size="sm" variant="ghost" onClick={onDeactivateLinks} title="Desativar todos os links vinculados a este plano (também no Asaas)" className="text-red-600 dark:text-red-300 hover:text-red-700 dark:hover:text-red-300">
-            <Link2Off className="size-4" />
+          <Button size="sm" variant="ghost" onClick={onDeactivateLinks} title="Arquivar todos os links vinculados a este plano" className="text-slate-600 dark:text-slate-300 hover:text-slate-800 dark:hover:text-white">
+            <Archive className="size-4" />
           </Button>
         )}
       </TableCell>
@@ -318,7 +319,7 @@ function PlanRow({ plan, activeLinks, editing, visibleColumns, onEdit, onCancelE
 
 type LinkDraft = { actorId?: string | null; planId?: string | null };
 
-function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors: CommercialActor[]; onChanged: () => void }) {
+function LinksPanel({ links, actors, subscriptions, onChanged }: { links: PaymentLink[]; actors: CommercialActor[]; subscriptions: Subscription[]; onChanged: () => void }) {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [filter, setFilter] = useState<(typeof linkFilters)[number]>("PENDING");
   const [kindFilter, setKindFilter] = useState<(typeof planKindFilters)[number]>("ALL");
@@ -360,6 +361,14 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
   }, [links, drafts]);
 
   const planById = useMemo(() => new Map(plans.map((plan) => [plan.id, plan])), [plans]);
+  const subscriptionCountByLink = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const subscription of subscriptions) {
+      if (!subscription.payment_link_id) continue;
+      counts.set(subscription.payment_link_id, (counts.get(subscription.payment_link_id) ?? 0) + 1);
+    }
+    return counts;
+  }, [subscriptions]);
   const term = search.trim().toLowerCase();
   const filtered = useMemo(
     () =>
@@ -506,12 +515,12 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
     });
   }
 
-  /** Deactivating actually disables the link at Asaas too (see the PATCH route) — the payer genuinely can't use it anymore, so it's worth a confirmation. Reactivating doesn't need one. */
-  const toggleLinkStatus = useCallback(async (linkId: string) => {
+  /** Archive state only organizes the local list; it never changes whether the payer can use the link at Asaas. */
+  const toggleLinkArchive = useCallback(async (linkId: string) => {
     const link = linksRef.current.find((l) => l.id === linkId);
     if (!link) return;
-    const nextStatus = link.status === "INACTIVE" ? "ACTIVE" : "INACTIVE";
-    if (nextStatus === "INACTIVE" && !window.confirm(`Desativar "${link.display_name}"? Ele deixa de aceitar pagamentos no Asaas também.`)) return;
+    const archiving = link.status !== "INACTIVE";
+    const nextStatus = archiving ? "INACTIVE" : link.plan_id ? "ACTIVE" : "PENDING";
     setTogglingId(link.id);
     try {
       const response = await fetch("/api/asaas/payment-links", {
@@ -521,7 +530,30 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
       });
       const data = await response.json();
       if (!response.ok) { toast.error(data.error ?? "Não foi possível atualizar o link."); return; }
-      toast.success(nextStatus === "INACTIVE" ? "Link desativado (no Asaas também)." : "Link reativado (no Asaas também).");
+      toast.success(archiving ? "Link arquivado. Ele continua disponível no Asaas." : "Link desarquivado.");
+      onChanged();
+    } finally {
+      setTogglingId(null);
+    }
+  }, [onChanged]);
+
+  /** Remote availability is deliberately exposed only for archived links. */
+  const toggleAsaasAvailability = useCallback(async (linkId: string) => {
+    const link = linksRef.current.find((item) => item.id === linkId);
+    if (!link || link.status !== "INACTIVE") return;
+    const currentlyActive = link.asaas_snapshot?.active !== false;
+    const asaasActive = !currentlyActive;
+    if (!asaasActive && !window.confirm(`Desabilitar "${link.display_name}" no Asaas? O link deixará de aceitar novos pagamentos.`)) return;
+    setTogglingId(link.id);
+    try {
+      const response = await fetch("/api/asaas/payment-links", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: link.id, asaasActive }),
+      });
+      const data = await response.json();
+      if (!response.ok) { toast.error(data.error ?? "Não foi possível atualizar o link no Asaas."); return; }
+      toast.success(asaasActive ? "Link habilitado no Asaas." : "Link desabilitado no Asaas.");
       onChanged();
     } finally {
       setTogglingId(null);
@@ -572,15 +604,16 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
             {columns.isVisible("kind") && <ResizableTh {...sorting.header("kind")} width={widths.getWidth("kind")} onResizeStart={widths.startResize("kind")}>Tipo</ResizableTh>}
             {columns.isVisible("actor") && <ResizableTh {...sorting.header("actor")} width={widths.getWidth("actor")} onResizeStart={widths.startResize("actor")}>Ator</ResizableTh>}
             {columns.isVisible("plan") && <ResizableTh {...sorting.header("plan")} width={widths.getWidth("plan")} onResizeStart={widths.startResize("plan")}>Plano</ResizableTh>}
+            {columns.isVisible("subscriptions") && <ResizableTh {...sorting.header("subscriptions")} width={widths.getWidth("subscriptions")} onResizeStart={widths.startResize("subscriptions")} className="text-right">Assinaturas</ResizableTh>}
             {columns.isVisible("value") && <ResizableTh {...sorting.header("value")} width={widths.getWidth("value")} onResizeStart={widths.startResize("value")} className="text-right">Valor</ResizableTh>}
             {columns.isVisible("source") && <ResizableTh {...sorting.header("source")} width={widths.getWidth("source")} onResizeStart={widths.startResize("source")}>Origem</ResizableTh>}
             {columns.isVisible("status") && <ResizableTh {...sorting.header("status")} width={widths.getWidth("status")} onResizeStart={widths.startResize("status")}>Status</ResizableTh>}
-            <TableHead className="w-[190px]" />
+            <TableHead className="w-[260px]" />
           </TableRow>
         </TableHeader>
         <TableBody>
           {filtered.length === 0 && <TableRow><TableCell colSpan={columns.visibleCount + 3} className="text-center text-sm text-slate-500 dark:text-muted-foreground">Nenhum link nesse filtro.</TableCell></TableRow>}
-          {sorting.rows(filtered, link => ({ link: link.display_name, kind: planKindLabels[linkKind(link, planById)], actor: actors.find(actor => actor.id === draftActorId(link))?.name, plan: planById.get(draftPlanId(link) ?? "")?.name, value: Number(link.value), source: link.source === "ASAAS_SYNC" ? "Importado do Asaas" : "Gerado aqui", status: link.status === "ACTIVE" ? "Ativo" : link.status === "PENDING" ? "Pendente" : "Inativo" })).map((link) => {
+          {sorting.rows(filtered, link => ({ link: link.display_name, kind: planKindLabels[linkKind(link, planById)], actor: actors.find(actor => actor.id === draftActorId(link))?.name, plan: planById.get(draftPlanId(link) ?? "")?.name, subscriptions: subscriptionCountByLink.get(link.id) ?? 0, value: Number(link.value), source: link.source === "ASAAS_SYNC" ? "Importado do Asaas" : "Gerado aqui", status: link.status === "ACTIVE" ? "Ativo" : link.status === "PENDING" ? "Pendente" : "Arquivado" })).map((link) => {
             const boundPlan = link.plan_id ? planById.get(link.plan_id) : undefined;
             return (
               <LinkRow
@@ -592,9 +625,11 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
                 selected={selected.has(link.id)}
                 draftActorId={draftActorId(link)}
                 draftPlanId={draftPlanId(link)}
+                subscriptionCount={subscriptionCountByLink.get(link.id) ?? 0}
                 showKind={columns.isVisible("kind")}
                 showActor={columns.isVisible("actor")}
                 showPlan={columns.isVisible("plan")}
+                showSubscriptions={columns.isVisible("subscriptions")}
                 showValue={columns.isVisible("value")}
                 showSource={columns.isVisible("source")}
                 showStatus={columns.isVisible("status")}
@@ -605,7 +640,8 @@ function LinksPanel({ links, actors, onChanged }: { links: PaymentLink[]; actors
                 onToggleSelected={toggleSelected}
                 onSetDraft={setDraft}
                 onConfirm={confirmLink}
-                onToggleStatus={toggleLinkStatus}
+                onToggleArchive={toggleLinkArchive}
+                onToggleAsaas={toggleAsaasAvailability}
               />
             );
           })}
@@ -633,9 +669,11 @@ const LinkRow = memo(function LinkRow({
   selected,
   draftActorId,
   draftPlanId,
+  subscriptionCount,
   showKind,
   showActor,
   showPlan,
+  showSubscriptions,
   showValue,
   showSource,
   showStatus,
@@ -646,7 +684,8 @@ const LinkRow = memo(function LinkRow({
   onToggleSelected,
   onSetDraft,
   onConfirm,
-  onToggleStatus,
+  onToggleArchive,
+  onToggleAsaas,
 }: {
   link: PaymentLink;
   kind: Plan["kind"];
@@ -655,9 +694,11 @@ const LinkRow = memo(function LinkRow({
   selected: boolean;
   draftActorId: string | null;
   draftPlanId: string | null;
+  subscriptionCount: number;
   showKind: boolean;
   showActor: boolean;
   showPlan: boolean;
+  showSubscriptions: boolean;
   showValue: boolean;
   showSource: boolean;
   showStatus: boolean;
@@ -668,7 +709,8 @@ const LinkRow = memo(function LinkRow({
   onToggleSelected: (id: string, checked: boolean) => void;
   onSetDraft: (id: string, patch: LinkDraft) => void;
   onConfirm: (id: string) => void;
-  onToggleStatus: (id: string) => void;
+  onToggleArchive: (id: string) => void;
+  onToggleAsaas: (id: string) => void;
 }) {
   return (
     <TableRow className={dirty ? "bg-amber-50 dark:bg-amber-950/40" : undefined}>
@@ -687,17 +729,23 @@ const LinkRow = memo(function LinkRow({
           <EntitySelect className="w-44" value={draftPlanId ?? "none"} onValueChange={(value) => onSetDraft(link.id, { planId: value === "none" ? null : value })} placeholder="Sem plano" options={[{ value: "none", label: "Sem plano" }, ...plans.map((plan) => ({ value: plan.id, label: plan.name }))]} />
         </TableCell>
       )}
+      {showSubscriptions && <TableCell className="text-right tabular-nums">{subscriptionCount}</TableCell>}
       {showValue && <TableCell className="text-right text-sm">{money.format(link.value)}<span className="ml-1 text-xs text-slate-400">{link.billing_period === "ANNUAL" ? "/ano" : link.billing_period === "ONE_TIME" ? " · taxa única" : "/mês"}</span></TableCell>}
       {showSource && <TableCell className="text-xs text-slate-500 dark:text-muted-foreground">{link.source === "ASAAS_SYNC" ? "Importado do Asaas" : "Gerado aqui"}</TableCell>}
-      {showStatus && <TableCell><StatusBadge status={link.status} />{link.asaas_snapshot && <p className="mt-1 text-xs text-muted-foreground" title={link.asaas_synced_at ? `Consultado em ${new Date(link.asaas_synced_at).toLocaleString("pt-BR")}` : undefined}>Asaas: {link.asaas_snapshot.deleted ? "Removido" : link.asaas_snapshot.active === false ? "Inativo" : "Ativo"}</p>}</TableCell>}
+      {showStatus && <TableCell>{link.status === "INACTIVE" ? <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-600 dark:border-border dark:bg-muted dark:text-muted-foreground"><span className="mr-1.5 size-1.5 rounded-full bg-slate-400" />Arquivado</Badge> : <StatusBadge status={link.status} />}{link.asaas_snapshot && <p className="mt-1 text-xs text-muted-foreground" title={link.asaas_synced_at ? `Consultado em ${new Date(link.asaas_synced_at).toLocaleString("pt-BR")}` : undefined}>Asaas: {link.asaas_snapshot.deleted ? "Removido" : link.asaas_snapshot.active === false ? "Inativo" : "Ativo"}</p>}</TableCell>}
       <TableCell className="flex justify-end gap-1.5">
         {dirty && (
           <Button size="sm" disabled={confirming} onClick={() => onConfirm(link.id)} className="bg-[#3a5d9d] text-white hover:bg-[#2c4a80]">
             {confirming ? "Vinculando…" : "Vincular"}
           </Button>
         )}
-        <Button variant="ghost" size="sm" disabled={toggling} onClick={() => onToggleStatus(link.id)} className={link.status === "INACTIVE" ? "text-emerald-700 dark:text-emerald-300 hover:text-emerald-800 dark:hover:text-emerald-300" : "text-red-600 dark:text-red-300 hover:text-red-700 dark:hover:text-red-300"}>
-          {toggling ? "…" : link.status === "INACTIVE" ? "Reativar" : "Desativar"}
+        {link.status === "INACTIVE" && !link.asaas_snapshot?.deleted && (
+          <Button variant="outline" size="sm" disabled={toggling || !link.asaas_payment_link_id} onClick={() => onToggleAsaas(link.id)} className={link.asaas_snapshot?.active === false ? "text-emerald-700 dark:text-emerald-300" : "text-red-600 dark:text-red-300"}>
+            {toggling ? "…" : link.asaas_snapshot?.active === false ? "Habilitar no Asaas" : "Desabilitar no Asaas"}
+          </Button>
+        )}
+        <Button variant="ghost" size="sm" disabled={toggling} onClick={() => onToggleArchive(link.id)} className="text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white">
+          {toggling ? "…" : link.status === "INACTIVE" ? "Desarquivar" : "Arquivar"}
         </Button>
       </TableCell>
     </TableRow>

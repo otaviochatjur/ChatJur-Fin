@@ -91,23 +91,27 @@ export async function POST(request: Request) {
   }
 }
 
-type BindPayload = { id?: string; actorId?: string | null; planId?: string | null; status?: "ACTIVE" | "INACTIVE" | "PENDING" };
+type BindPayload = {
+  id?: string;
+  actorId?: string | null;
+  planId?: string | null;
+  status?: "ACTIVE" | "INACTIVE" | "PENDING";
+  asaasActive?: boolean;
+};
 
 /**
  * Binds (or rebinds) a payment link to a partner/ambassador/sales rep and/or
- * a plan, and/or manually toggles it ACTIVE/INACTIVE. Used by the links
- * management panel, mainly to resolve links that came from `sync-links` as
- * orphans (created directly in the Asaas dashboard, so nobody here knows
- * who they belong to or which plan they represent yet) — and to let an
- * operator deactivate a link straight from here.
+ * a plan, archives/unarchives it locally, or changes its availability at
+ * Asaas. Availability can only be changed after the link has been archived,
+ * which keeps the destructive remote action out of the main links list.
  */
 export async function PATCH(request: Request) {
   try {
     const payload = (await request.json()) as BindPayload;
     if (!payload.id) return Response.json({ error: "id é obrigatório." }, { status: 400 });
 
-    const [current] = await supabaseRequest<{ actor_id: string | null; plan_id: string | null; status: string; asaas_payment_link_id: string | null }[]>(
-      `/rest/v1/payment_links?id=eq.${encodeURIComponent(payload.id)}&select=actor_id,plan_id,status,asaas_payment_link_id`,
+    const [current] = await supabaseRequest<{ actor_id: string | null; plan_id: string | null; status: string; asaas_payment_link_id: string | null; asaas_snapshot: Record<string, unknown> | null }[]>(
+      `/rest/v1/payment_links?id=eq.${encodeURIComponent(payload.id)}&select=actor_id,plan_id,status,asaas_payment_link_id,asaas_snapshot`,
     );
     if (!current) return Response.json({ error: "Link não encontrado." }, { status: 404 });
 
@@ -127,28 +131,29 @@ export async function PATCH(request: Request) {
     }
 
     const nextPlanId = payload.planId !== undefined ? payload.planId : current.plan_id;
-    // A manual ACTIVE/INACTIVE toggle (the "Desativar"/"Reativar" button)
-    // always wins over the automatic PENDING/ACTIVE bookkeeping below, and —
-    // unlike that bookkeeping, which is purely local — mirrors onto the real
-    // link at Asaas so the payer actually can't pay it anymore either.
-    //
-    // Only the plan gates "pending": the actor is deliberately optional —
-    // plenty of links are direct company sales with no partner/embaixador/
-    // comercial behind them, and those are fully resolved once the plan is
-    // known, with no owner to assign. Requiring both used to leave
-    // plan-only-bound direct-sale links stuck as "pendente" forever.
+    // INACTIVE is the local archived state. Archiving never changes the real
+    // link at Asaas; remote availability is a separate action below.
     if (payload.status !== undefined) {
       body.status = payload.status;
-      if ((payload.status === "ACTIVE" || payload.status === "INACTIVE") && current.asaas_payment_link_id) {
-        await asaasRequest(`/paymentLinks/${encodeURIComponent(current.asaas_payment_link_id)}`, {
-          method: "PUT",
-          body: { active: payload.status === "ACTIVE" },
-        });
-      }
     } else if (current.status === "PENDING" && nextPlanId) {
       body.status = "ACTIVE";
     } else if (current.status !== "INACTIVE" && !nextPlanId) {
       body.status = "PENDING";
+    }
+
+    if (typeof payload.asaasActive === "boolean") {
+      if (current.status !== "INACTIVE") {
+        return Response.json({ error: "Arquive o link antes de alterar sua disponibilidade no Asaas." }, { status: 409 });
+      }
+      if (!current.asaas_payment_link_id) {
+        return Response.json({ error: "Este link não possui um identificador no Asaas." }, { status: 400 });
+      }
+      await asaasRequest(`/paymentLinks/${encodeURIComponent(current.asaas_payment_link_id)}`, {
+        method: "PUT",
+        body: { active: payload.asaasActive },
+      });
+      body.asaas_snapshot = { ...(current.asaas_snapshot ?? {}), active: payload.asaasActive };
+      body.asaas_synced_at = new Date().toISOString();
     }
     if (Object.keys(body).length === 0) return Response.json({ error: "Nada para atualizar." }, { status: 400 });
 
