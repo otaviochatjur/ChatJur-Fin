@@ -329,6 +329,7 @@ function LinksPanel({ links, actors, subscriptions, onChanged }: { links: Paymen
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [confirmingBulk, setConfirmingBulk] = useState(false);
+  const [archivingBulk, setArchivingBulk] = useState(false);
   // Ator/plano escolhidos no <Select> ficam só em rascunho aqui — nada é
   // salvo até o operador clicar em "Vincular" (linha) ou "Vincular
   // selecionados" (lote). Evita vinculação acidental ao passar o mouse ou
@@ -417,6 +418,10 @@ function LinksPanel({ links, actors, subscriptions, onChanged }: { links: Paymen
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `isDirty` is a plain function recreated every render that only reads `drafts` (already listed); adding it here would just churn the memo on every render for no reason.
     [selected, links, drafts],
   );
+  const archivableSelectedIds = useMemo(
+    () => [...selected].filter((id) => links.some((link) => link.id === id && link.status !== "INACTIVE")),
+    [selected, links],
+  );
 
   function syncFromAsaas() {
     window.dispatchEvent(new Event("nexo:sync-asaas-base"));
@@ -499,6 +504,27 @@ function LinksPanel({ links, actors, subscriptions, onChanged }: { links: Paymen
     }
   }
 
+  async function archiveSelected() {
+    if (archivableSelectedIds.length === 0) return;
+    if (!window.confirm(`Arquivar os ${archivableSelectedIds.length} link(s) selecionado(s)? Eles continuarão disponíveis no Asaas.`)) return;
+    setArchivingBulk(true);
+    try {
+      const response = await fetch("/api/asaas/payment-links/bulk-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: archivableSelectedIds, status: "INACTIVE" }),
+      });
+      const data = await response.json();
+      if (!response.ok) { toast.error(data.error ?? "Não foi possível arquivar os links selecionados."); return; }
+      const failedNote = data.failed.length > 0 ? ` ${data.failed.length} falharam: ${data.failed.join(", ")}.` : "";
+      toast.success(`${data.succeeded}/${data.total} link(s) arquivado(s).${failedNote}`);
+      setSelected(new Set());
+      onChanged();
+    } finally {
+      setArchivingBulk(false);
+    }
+  }
+
   const toggleSelected = useCallback((id: string, checked: boolean) => {
     setSelected((current) => {
       const next = new Set(current);
@@ -568,8 +594,13 @@ function LinksPanel({ links, actors, subscriptions, onChanged }: { links: Paymen
           <p className="mt-1 text-sm text-slate-500 dark:text-muted-foreground">{pendingCount > 0 ? `${pendingCount} link(s) pendente(s) de vinculação` : "Todos os links estão vinculados"}</p>
         </div>
         <div className="flex items-center gap-2">
+          {archivableSelectedIds.length > 0 && (
+            <Button variant="outline" size="sm" disabled={archivingBulk || confirmingBulk} onClick={archiveSelected}>
+              {archivingBulk ? "Arquivando…" : `Arquivar selecionados (${archivableSelectedIds.length})`}
+            </Button>
+          )}
           {dirtySelectedCount > 0 && (
-            <Button size="sm" disabled={confirmingBulk} onClick={confirmSelected} className="bg-[#3a5d9d] text-white hover:bg-[#2c4a80]">
+            <Button size="sm" disabled={confirmingBulk || archivingBulk} onClick={confirmSelected} className="bg-[#3a5d9d] text-white hover:bg-[#2c4a80]">
               {confirmingBulk ? "Vinculando…" : `Vincular selecionados (${dirtySelectedCount})`}
             </Button>
           )}

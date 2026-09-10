@@ -357,3 +357,44 @@ test("payment links are archived locally before their Asaas availability can cha
     }
   }
 });
+
+test("selected payment links can be archived in one local batch", async () => {
+  const { withWebhookTenant } = await vite.ssrLoadModule("/lib/tenant-server.ts");
+  const { POST } = await vite.ssrLoadModule("/app/api/asaas/payment-links/bulk-status/route.ts");
+  const previousFetch = globalThis.fetch;
+  const previous = { ...process.env };
+  Object.assign(process.env, { SUPABASE_URL: "https://db.invalid", SUPABASE_SERVICE_ROLE_KEY: "service-test" });
+  const ids = ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"];
+  const archived = [];
+  globalThis.fetch = async (input, options = {}) => {
+    const url = new URL(input);
+    assert.equal(url.host, "db.invalid", "batch archiving must never call Asaas");
+    const table = url.pathname.split("/").at(-1);
+    if (table === "payment_links" && (options.method ?? "GET") === "GET") {
+      assert.equal(url.searchParams.get("id"), `in.(${ids.join(",")})`);
+      return Response.json(ids.map((id, index) => ({ id, display_name: `Link ${index + 1}` })));
+    }
+    if (table === "payment_links" && options.method === "PATCH") {
+      assert.equal(JSON.parse(options.body).status, "INACTIVE");
+      archived.push(url.searchParams.get("id"));
+      return Response.json([]);
+    }
+    if (table === "audit_events") return Response.json([]);
+    throw new Error(`Unexpected request ${url}`);
+  };
+  try {
+    const response = await withWebhookTenant({ id: "tenant-a", owner_user_id: null, reserved_email: null, legacy: true }, () => POST(new Request("http://localhost/api/asaas/payment-links/bulk-status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids, status: "INACTIVE" }),
+    })));
+    assert.equal(response.status, 200);
+    assert.deepEqual(archived, ids.map((id) => `eq.${id}`));
+    assert.deepEqual(await response.json(), { total: 2, succeeded: 2, failed: [] });
+  } finally {
+    globalThis.fetch = previousFetch;
+    for (const key of ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"]) {
+      if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key];
+    }
+  }
+});
