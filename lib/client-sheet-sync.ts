@@ -1,5 +1,5 @@
 import { listClientsInSheet, type ClientSheetRow } from "./clients-allowlist";
-import { supabaseRequest } from "./supabase-server";
+import { mergeCustomerRecords, supabaseRequest } from "./supabase-server";
 import { currentTenant } from "./tenant-server";
 
 type StoredCustomer = {
@@ -14,6 +14,7 @@ type StoredCustomer = {
   service_area: string | null;
   source_channel: string | null;
   signed_at: string | null;
+  created_at: string;
 };
 
 export type ClientSheetSyncResult = {
@@ -21,6 +22,8 @@ export type ClientSheetSyncResult = {
   created: number;
   updated: number;
   unchanged: number;
+  consolidated: number;
+  consolidatedEmails: string[];
   skippedWithoutSignedAt: string[];
   ignoredWithoutEmail: number;
   duplicateSheetEmails: string[];
@@ -32,7 +35,7 @@ export type ClientSheetSyncResult = {
   systemCustomersWithoutEmail: string[];
 };
 
-const CUSTOMER_SELECT = "id,external_office_id,office_name,responsible_name,email,phone,city,state,service_area,source_channel,signed_at";
+const CUSTOMER_SELECT = "id,external_office_id,office_name,responsible_name,email,phone,city,state,service_area,source_channel,signed_at,created_at";
 
 function normalizedEmail(value: string | null | undefined) {
   return value?.trim().toLowerCase() ?? "";
@@ -73,8 +76,40 @@ export async function syncClientsFromSheet(options: { dryRun?: boolean } = {}): 
   const tenant = await currentTenant();
   if (!tenant.legacy) throw new Error("A Base de Clientes está disponível somente para a conta principal.");
 
-  const [sheet, customers] = await Promise.all([listClientsInSheet(), allCustomers()]);
+  const [sheet, loadedCustomers] = await Promise.all([listClientsInSheet(), allCustomers()]);
   const sourceRows = sheet.rows;
+  const sourceByEmail = new Map<string, ClientSheetRow[]>();
+  for (const row of sourceRows) {
+    const rows = sourceByEmail.get(row.email) ?? [];
+    rows.push(row);
+    sourceByEmail.set(row.email, rows);
+  }
+  const loadedSystemByEmail = new Map<string, StoredCustomer[]>();
+  for (const customer of loadedCustomers) {
+    const email = normalizedEmail(customer.email);
+    if (!email) continue;
+    const matches = loadedSystemByEmail.get(email) ?? [];
+    matches.push(customer);
+    loadedSystemByEmail.set(email, matches);
+  }
+
+  // One row in the authoritative Base means one real client. Multiple
+  // internal rows for that email are old Asaas identities of the same
+  // client and are consolidated; multiple source rows remain separate.
+  const mergedIds = new Set<string>();
+  const consolidatedEmails: string[] = [];
+  for (const [email, candidates] of loadedSystemByEmail) {
+    const sourceMatches = sourceByEmail.get(email) ?? [];
+    if (sourceMatches.length !== 1 || candidates.length < 2) continue;
+    const source = sourceMatches[0];
+    const keep = (source.officeId ? candidates.find(candidate => candidate.external_office_id === source.officeId) : null)
+      ?? [...candidates].sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
+    const duplicates = candidates.filter(candidate => candidate.id !== keep.id);
+    if (!options.dryRun) await mergeCustomerRecords(keep.id, duplicates.map(candidate => candidate.id));
+    for (const duplicate of duplicates) mergedIds.add(duplicate.id);
+    consolidatedEmails.push(email);
+  }
+  const customers = loadedCustomers.filter(customer => !mergedIds.has(customer.id));
   const systemByEmail = new Map<string, StoredCustomer[]>();
   for (const customer of customers) {
     const email = normalizedEmail(customer.email);
@@ -211,6 +246,8 @@ export async function syncClientsFromSheet(options: { dryRun?: boolean } = {}): 
     created,
     updated,
     unchanged,
+    consolidated: mergedIds.size,
+    consolidatedEmails: consolidatedEmails.sort(),
     skippedWithoutSignedAt: [...new Set(skippedWithoutSignedAt)].sort(),
     ignoredWithoutEmail: sheet.ignoredWithoutEmail,
     duplicateSheetEmails: sheet.duplicateEmails,

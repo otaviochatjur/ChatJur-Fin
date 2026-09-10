@@ -292,11 +292,13 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
             <DialogDescription>Os cadastros foram reconciliados por e-mail. Status, planos, pagamentos e históricos foram preservados.</DialogDescription>
           </DialogHeader>
           {sheetSyncResult && <div className="space-y-4 text-sm">
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <div className="rounded-xl bg-emerald-50 p-3 dark:bg-emerald-950/40"><p className="text-xs text-emerald-700 dark:text-emerald-300">Incluídos</p><p className="mt-1 text-xl font-semibold">{sheetSyncResult.created}</p></div>
               <div className="rounded-xl bg-blue-50 p-3 dark:bg-blue-950/40"><p className="text-xs text-blue-700 dark:text-blue-300">Atualizados</p><p className="mt-1 text-xl font-semibold">{sheetSyncResult.updated}</p></div>
+              <div className="rounded-xl bg-violet-50 p-3 dark:bg-violet-950/40"><p className="text-xs text-violet-700 dark:text-violet-300">Duplicados consolidados</p><p className="mt-1 text-xl font-semibold">{sheetSyncResult.consolidated}</p></div>
               <div className="rounded-xl bg-slate-50 p-3 dark:bg-muted"><p className="text-xs text-slate-500 dark:text-muted-foreground">Sem alteração</p><p className="mt-1 text-xl font-semibold">{sheetSyncResult.unchanged}</p></div>
             </div>
+            {sheetSyncResult.consolidatedEmails.length > 0 && <p className="rounded-xl bg-violet-50 p-3 text-violet-900 dark:bg-violet-950/40 dark:text-violet-200">Cadastros antigos consolidados com todos os vínculos preservados: {sheetSyncResult.consolidatedEmails.join(", ")}.</p>}
             {sheetSyncResult.systemOnlyEmails.length > 0 && <SyncIssue title={`No sistema, mas fora da Base de Clientes (${sheetSyncResult.systemOnlyEmails.length})`} items={sheetSyncResult.systemOnlyEmails} />}
             {sheetSyncResult.skippedWithoutSignedAt.length > 0 && <SyncIssue title={`Sem data “Assinado em” (${sheetSyncResult.skippedWithoutSignedAt.length})`} items={sheetSyncResult.skippedWithoutSignedAt} tone="danger" />}
             {sheetSyncResult.duplicateSheetEmails.length > 0 && <SyncIssue title="E-mails compartilhados na Base — clientes mantidos separados" items={sheetSyncResult.duplicateSheetEmails} />}

@@ -21,6 +21,21 @@ export async function finishAsaasBaseSync<T>(generation: string, offset: number)
   return data as T;
 }
 
+/** Atomically moves every customer-owned relationship before deleting duplicate rows. */
+export async function mergeCustomerRecords<T>(keepId: string, mergeIds: string[]): Promise<T> {
+  const tenant = await currentTenant();
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!key || !process.env.SUPABASE_URL) throw new Error("Supabase não configurado.");
+  const response = await fetch(`${process.env.SUPABASE_URL}/rest/v1/rpc/merge_customer_records`, {
+    method: "POST",
+    headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ p_tenant: tenant.id, p_keep: keepId, p_merge: mergeIds }),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.message ?? "Não foi possível consolidar os cadastros duplicados.");
+  return data as T;
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
