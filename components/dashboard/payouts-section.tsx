@@ -139,7 +139,7 @@ function buildDemoPartnerItems(actor: CommercialActor) {
  * report's layout before every partner's banking/commission data is filled
  * in. It never writes anything to Supabase.
  */
-export function PayoutsSection({ actors, subscriptions, payments, customers, links }: { actors: CommercialActor[]; subscriptions: Subscription[]; payments: Payment[]; customers: Customer[]; links: PaymentLink[] }) {
+export function PayoutsSection({ actors, subscriptions, customers, links }: { actors: CommercialActor[]; subscriptions: Subscription[]; customers: Customer[]; links: PaymentLink[] }) {
   const [role, setRole] = useState<(typeof ROLE_TABS)[number]>("PARTNER");
   const [period, setPeriod] = useState(currentPeriod());
   const [rates, setRates] = useState<CommissionRate[]>([]);
@@ -160,6 +160,7 @@ export function PayoutsSection({ actors, subscriptions, payments, customers, lin
   const [dialogComputedAmount, setDialogComputedAmount] = useState(0);
   const [saving, setSaving] = useState(false);
   const [historyActor, setHistoryActor] = useState<CommercialActor | null>(null);
+  const [periodData, setPeriodData] = useState<{ period: string; payments: Payment[] }>({ period: "", payments: [] });
 
   async function load() {
     const [ratesRes, payoutsRes] = await Promise.all([fetch("/api/commission-rates"), fetch("/api/payouts")]);
@@ -175,9 +176,28 @@ export function PayoutsSection({ actors, subscriptions, payments, customers, lin
     load();
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    async function loadPeriodPayments() {
+      const response = await fetch(`/api/payments?period=${encodeURIComponent(period)}`, { cache: "no-store" });
+      const data = await response.json();
+      if (cancelled) return;
+      if (!response.ok) {
+        toast.error(data.error ?? "Não foi possível carregar os pagamentos do período.");
+        setPeriodData({ period, payments: [] });
+        return;
+      }
+      setPeriodData({ period, payments: data.payments ?? [] });
+    }
+    void loadPeriodPayments();
+    return () => { cancelled = true; };
+  }, [period]);
+
   const actorsForRole = useMemo(() => actors.filter((actor) => actor.role === role), [actors, role]);
   const referenceMonth = `${period}-01`;
   const attribution = useMemo(() => ({ customers, links }), [customers, links]);
+  const periodLoading = periodData.period !== period;
+  const payments = useMemo(() => periodLoading ? [] : periodData.payments, [periodData.payments, periodLoading]);
 
   const rows = useMemo(() => actorsForRole.map((actor) => {
     const computed = computeActorPayout(actor.id, period, subscriptions, payments, rates, attribution);
@@ -379,6 +399,7 @@ export function PayoutsSection({ actors, subscriptions, payments, customers, lin
         <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-muted-foreground">
           Período
           <Input type="month" value={period} onChange={(event) => setPeriod(event.target.value)} className="w-40" />
+          {periodLoading && <span className="text-xs text-slate-400">Carregando pagamentos…</span>}
         </label>
       </div>
 
@@ -405,8 +426,8 @@ export function PayoutsSection({ actors, subscriptions, payments, customers, lin
             Usar dados fictícios (demonstração) — gera números de exemplo para {rolePluralLabels[role].toLowerCase()}, ignorando a seleção. Útil para ver o layout antes de preencher os dados reais.
           </label>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" className="gap-1.5" disabled={exporting} onClick={exportAccountingReport}><FileDown className="size-3.5" />Relatório para contabilidade</Button>
-            <Button variant="outline" size="sm" className="gap-1.5" disabled={exporting} onClick={exportPartnerReports}><FileDown className="size-3.5" />Relatório por parceiro</Button>
+            <Button variant="outline" size="sm" className="gap-1.5" disabled={exporting || periodLoading} onClick={exportAccountingReport}><FileDown className="size-3.5" />Relatório para contabilidade</Button>
+            <Button variant="outline" size="sm" className="gap-1.5" disabled={exporting || periodLoading} onClick={exportPartnerReports}><FileDown className="size-3.5" />Relatório por parceiro</Button>
           </div>
         </div>
       </div>

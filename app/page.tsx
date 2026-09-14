@@ -108,7 +108,7 @@ function Dashboard() {
           {sectionId === "clients" && <ClientsSection customers={customers} subscriptions={subscriptions} payments={payments} implementationPayments={implementationPayments} plans={plans} actors={actors} links={links} events={events} onChanged={reload} />}
           {sectionId === "connect" && <ConnectSection actors={actors} metrics={metrics} plans={recurringPlans} leads={connectLeads} onChanged={reload} />}
           {sectionId === "commercial" && <CommercialSection actors={actors} metrics={metrics} plans={recurringPlans} onChanged={reload} />}
-          {sectionId === "payouts" && <PayoutsSection actors={actors} subscriptions={subscriptions} payments={payments} customers={customers} links={links} />}
+          {sectionId === "payouts" && <PayoutsSection actors={actors} subscriptions={subscriptions} customers={customers} links={links} />}
           {sectionId === "renewals" && <RenewalsSection />}
           {sectionId === "usage" && <PlansUsageSection links={links} actors={actors} subscriptions={subscriptions} onChanged={reload} />}
           {sectionId === "integrations" && <IntegrationsSection />}

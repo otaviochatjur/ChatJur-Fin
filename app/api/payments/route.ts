@@ -3,6 +3,20 @@ import { supabaseRequest } from "@/lib/supabase-server";
 export async function GET(request: Request) {
   try {
     const params = new URL(request.url).searchParams;
+    const period = params.get("period");
+    if (period && !/^\d{4}-\d{2}$/.test(period)) return Response.json({ error: "Período inválido." }, { status: 400 });
+    if (period) {
+      const [year, month] = period.split("-").map(Number);
+      const start = `${period}-01`;
+      const endDate = new Date(Date.UTC(year, month, 1));
+      const end = `${endDate.getUTCFullYear()}-${String(endDate.getUTCMonth() + 1).padStart(2, "0")}-01`;
+      const select = "select=id,subscription_id,payment_link_id,asaas_payment_id,asaas_payment_link_id,customer_id,status,value,net_value,billing_type,due_date,payment_date,confirmed_date,refunded_at,created_at";
+      const [paidOnDate, confirmedWithoutPaymentDate] = await Promise.all([
+        supabaseRequest<unknown[]>(`/rest/v1/payments?${select}&payment_date=gte.${start}&payment_date=lt.${end}&order=payment_date.desc&limit=5000`),
+        supabaseRequest<unknown[]>(`/rest/v1/payments?${select}&payment_date=is.null&confirmed_date=gte.${start}&confirmed_date=lt.${end}&order=confirmed_date.desc&limit=5000`),
+      ]);
+      return Response.json({ payments: [...paidOnDate, ...confirmedWithoutPaymentDate] });
+    }
     const filters = [
       "select=id,subscription_id,payment_link_id,asaas_payment_id,asaas_payment_link_id,customer_id,status,value,net_value,billing_type,due_date,payment_date,confirmed_date,refunded_at,created_at",
       params.get("customerId") ? `customer_id=eq.${encodeURIComponent(params.get("customerId")!)}` : null,
