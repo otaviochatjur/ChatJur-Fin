@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
@@ -405,6 +406,11 @@ function ClientDetail({ customer, subscriptions, payments, implementationPayment
   }).length;
   const implementationsWithoutAssignedPlan = implementationPayments.filter((payment) => !payment.plan_id).length;
   const createdWithoutAsaasLink = [...payments, ...implementationPayments].filter((payment) => !payment.asaas_payment_link_id && !("source" in payment && payment.source === "MANUAL")).length;
+  const [officeName, setOfficeName] = useState(customer.office_name);
+  const [responsibleName, setResponsibleName] = useState(customer.responsible_name ?? "");
+  const [email, setEmail] = useState(customer.email ?? "");
+  const [phone, setPhone] = useState(customer.phone ?? "");
+  const [externalOfficeId, setExternalOfficeId] = useState(customer.external_office_id ?? "");
   const [status, setStatus] = useState<Customer["status"]>(customer.status);
   const [cancellationCategory, setCancellationCategory] = useState(customer.cancellation_category ?? "");
   const [cancellationReason, setCancellationReason] = useState(customer.cancellation_reason ?? "");
@@ -416,6 +422,7 @@ function ClientDetail({ customer, subscriptions, payments, implementationPayment
   const implementationPlans = plans.filter((plan) => (plan.kind === "IMPLEMENTATION" || plan.kind === "CONSULTING") && plan.status === "ACTIVE");
 
   async function save() {
+    if (!officeName.trim()) { toast.error("Informe o nome do cliente/escritório."); return; }
     setSaving(true);
     try {
       const response = await fetch("/api/customers", {
@@ -423,6 +430,11 @@ function ClientDetail({ customer, subscriptions, payments, implementationPayment
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           id: customer.id,
+          officeName,
+          responsibleName,
+          email,
+          phone,
+          externalOfficeId,
           status,
           cancellationCategory: cancellationCategory || null,
           cancellationReason: cancellationReason || null,
@@ -441,12 +453,37 @@ function ClientDetail({ customer, subscriptions, payments, implementationPayment
 
   return (
     <div className="space-y-4">
-      <div>
-        <p className="text-xs font-medium uppercase tracking-[0.14em] text-[#3b82f6]">Cliente selecionado</p>
-        <h2 className="mt-2 text-lg font-semibold">{customer.office_name}</h2>
-        <p className="text-sm text-slate-500 dark:text-muted-foreground">{customer.responsible_name ?? "—"} · {customer.email ?? "sem e-mail"}</p>
-        {(customer.city || customer.state) && <p className="text-xs text-slate-400">{[customer.city, customer.state].filter(Boolean).join(" - ")}</p>}
-      </div>
+      <section className="space-y-4 rounded-xl bg-slate-50/80 p-4 dark:bg-muted/30">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-[0.14em] text-[#3b82f6]">Dados do cliente</p>
+            <p className="mt-1 text-sm text-slate-500 dark:text-muted-foreground">Informações originadas da Base de Clientes e editáveis neste cadastro.</p>
+          </div>
+          <Button size="sm" disabled={saving} onClick={save}>{saving ? "Salvando…" : "Salvar dados"}</Button>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label htmlFor={`office-name-${customer.id}`}>Nome do cliente/escritório</Label>
+            <Input id={`office-name-${customer.id}`} value={officeName} onChange={(event) => setOfficeName(event.target.value)} maxLength={200} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={`responsible-name-${customer.id}`}>Nome do responsável</Label>
+            <Input id={`responsible-name-${customer.id}`} value={responsibleName} onChange={(event) => setResponsibleName(event.target.value)} maxLength={200} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={`office-id-${customer.id}`}>Office ID</Label>
+            <Input id={`office-id-${customer.id}`} className="font-mono" value={externalOfficeId} onChange={(event) => setExternalOfficeId(event.target.value)} maxLength={100} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={`customer-email-${customer.id}`}>E-mail</Label>
+            <Input id={`customer-email-${customer.id}`} type="email" value={email} onChange={(event) => setEmail(event.target.value)} maxLength={254} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={`customer-phone-${customer.id}`}>Telefone</Label>
+            <Input id={`customer-phone-${customer.id}`} type="tel" value={phone} onChange={(event) => setPhone(event.target.value)} maxLength={40} />
+          </div>
+        </div>
+      </section>
 
       {linksToReview.length > 1 && <div role="alert" className="rounded-xl bg-amber-500/10 p-4 text-sm text-amber-900 dark:text-amber-200"><p className="font-medium">Regularização necessária: pagamentos associados a {linksToReview.length} links.</p><p className="mt-1">Confira as assinaturas abaixo e desative no painel o plano que não deve permanecer ativo. O histórico dos pagamentos e dos links será preservado.</p></div>}
       {(paymentsWithoutAssignedPlan > 0 || implementationsWithoutAssignedPlan > 0) && <div role="alert" className="rounded-xl bg-amber-500/10 p-4 text-sm text-amber-900 dark:text-amber-200"><p className="font-medium">Há pagamentos sem plano definido.</p><p className="mt-1">{paymentsWithoutAssignedPlan + implementationsWithoutAssignedPlan} pagamento(s) precisam de regularização. Vincule o link ao plano em Planos e Links; para cobranças sem link, cadastre o plano manualmente no cliente.</p></div>}
@@ -519,7 +556,7 @@ function ClientDetail({ customer, subscriptions, payments, implementationPayment
       </div>
 
       <div className="space-y-3 rounded-xl border border-dashed border-slate-200 dark:border-border p-3">
-        <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500 dark:text-muted-foreground">Editar cadastro</p>
+        <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500 dark:text-muted-foreground">Status e informações internas</p>
         <Select value={status ?? "UNSET"} onValueChange={(value) => setStatus(value as ConfirmedStatus)}>
           <SelectTrigger className="w-full"><SelectValue>{statusLabelOrUnset(status)}</SelectValue></SelectTrigger>
           <SelectContent>
@@ -543,7 +580,7 @@ function ClientDetail({ customer, subscriptions, payments, implementationPayment
           </>
         )}
         <Textarea placeholder="Comentários internos (CS)" value={comments} onChange={(event) => setComments(event.target.value)} />
-        <Button className="w-full bg-[#3a5d9d] text-white hover:bg-[#2c4a80]" disabled={saving} onClick={save}>{saving ? "Salvando…" : "Salvar alterações"}</Button>
+        <Button className="w-full bg-[#3a5d9d] text-white hover:bg-[#2c4a80]" disabled={saving} onClick={save}>{saving ? "Salvando…" : "Salvar status e informações internas"}</Button>
       </div>
     </div>
   );
