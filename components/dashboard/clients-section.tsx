@@ -165,6 +165,23 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
     return map;
   }, [subscriptions]);
   const displayedSubscriptionByCustomer = useMemo(() => new Map([...linkedByCustomer].map(([id, list]) => [id, list[0]])), [linkedByCustomer]);
+  const actorById = useMemo(() => new Map(actors.map((actor) => [actor.id, actor])), [actors]);
+  const actorPresentationByCustomer = useMemo(() => {
+    const map = new Map<string, { ids: string[]; label: string }>();
+    for (const customer of customers) {
+      const directlyAssigned = customer.acquisition_actor_id ? actorById.get(customer.acquisition_actor_id) : null;
+      if (directlyAssigned) {
+        map.set(customer.id, { ids: [directlyAssigned.id], label: `${roleLabels[directlyAssigned.role]} · ${directlyAssigned.name}` });
+        continue;
+      }
+
+      const linked = (linkedByCustomer.get(customer.id) ?? []).filter((subscription) => subscription.display_actor_id);
+      const ids = [...new Set(linked.map((subscription) => subscription.display_actor_id!))];
+      const labels = [...new Set(linked.map((subscription) => subscription.display_actor_label ?? "Sem responsável comercial"))];
+      map.set(customer.id, { ids, label: labels.join(" · ") });
+    }
+    return map;
+  }, [actorById, customers, linkedByCustomer]);
 
   // `activeCustomizations` scans the *entire* `events` array — fine for one
   // subscription, but the clients table calls it once per *visible row*
@@ -183,11 +200,11 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
     const term = search.trim().toLowerCase();
     return customers.filter((customer) => {
       if (statusFilter === "UNSET" ? customer.status !== null : statusFilter !== "all" && customer.status !== statusFilter) return false;
-      if (actorFilter !== "all" && !(linkedByCustomer.get(customer.id) ?? []).some(s => s.display_actor_id === actorFilter)) return false;
+      if (actorFilter !== "all" && !actorPresentationByCustomer.get(customer.id)?.ids.includes(actorFilter)) return false;
       if (!term) return true;
       return [customer.office_name, customer.responsible_name, customer.email].some((field) => field?.toLowerCase().includes(term));
     });
-  }, [customers, search, statusFilter, actorFilter, linkedByCustomer]);
+  }, [customers, search, statusFilter, actorFilter, actorPresentationByCustomer]);
 
   async function syncAllPayments() {
     setSyncingAll(true);
@@ -290,7 +307,7 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
           </TableHeader>
           <TableBody>
             {filtered.length === 0 && <TableRow><TableCell colSpan={columns.visibleCount + 1} className="text-center text-sm text-slate-500 dark:text-muted-foreground">Nenhum cliente encontrado.</TableCell></TableRow>}
-            {sorting.rows(filtered, customer => { return { client: customer.office_name, status: statusLabelOrUnset(customer.status), plan: (linkedByCustomer.get(customer.id) ?? []).map(s => s.display_plan_name).join(", "), mrr: activeSubscriptionByCustomer.get(customer.id) ? monthlyValue(activeSubscriptionByCustomer.get(customer.id)!.value, activeSubscriptionByCustomer.get(customer.id)!.billing_period) : null, actor: (linkedByCustomer.get(customer.id) ?? []).map(s => s.display_actor_label ?? "Sem responsável comercial").join(" · "), signedAt: customer.signed_at }; }).map((customer) => {
+            {sorting.rows(filtered, customer => { return { client: customer.office_name, status: statusLabelOrUnset(customer.status), plan: (linkedByCustomer.get(customer.id) ?? []).map(s => s.display_plan_name).join(", "), mrr: activeSubscriptionByCustomer.get(customer.id) ? monthlyValue(activeSubscriptionByCustomer.get(customer.id)!.value, activeSubscriptionByCustomer.get(customer.id)!.billing_period) : null, actor: actorPresentationByCustomer.get(customer.id)?.label ?? "", signedAt: customer.signed_at }; }).map((customer) => {
               const subscription = displayedSubscriptionByCustomer.get(customer.id);
               const active = activeSubscriptionByCustomer.get(customer.id);
               const mrr = active ? monthlyValue(active.value, active.billing_period) : 0;
@@ -303,7 +320,7 @@ export function ClientsSection({ customers, subscriptions, payments, implementat
                   {columns.isVisible("status") && <TableCell><Badge variant="outline" className={statusBadgeClassOrUnset(customer.status)}>{statusLabelOrUnset(customer.status)}</Badge></TableCell>}
                   {columns.isVisible("plan") && <TableCell className="text-sm text-slate-600 dark:text-muted-foreground"><span className="inline-flex items-center gap-1">{(linkedByCustomer.get(customer.id) ?? []).map(s => s.display_plan_name).join(" · ") || "—"}{(linkedByCustomer.get(customer.id)?.length ?? 0) > 1 && <Badge variant="outline" className="text-amber-700 dark:text-amber-300">Revisar planos</Badge>}{subscription && <CustomizationHint items={customizationsByCustomer.get(customer.id) ?? []} />}</span></TableCell>}
                   {columns.isVisible("mrr") && <TableCell className="text-right text-sm font-medium">{mrr > 0 ? money.format(mrr) : "—"}</TableCell>}
-                  {columns.isVisible("actor") && <TableCell className="text-sm text-slate-600 dark:text-muted-foreground">{(linkedByCustomer.get(customer.id) ?? []).map(s => s.display_actor_label ?? "Sem responsável comercial").join(" · ") || "—"}</TableCell>}
+                  {columns.isVisible("actor") && <TableCell className="text-sm text-slate-600 dark:text-muted-foreground">{actorPresentationByCustomer.get(customer.id)?.label || "—"}</TableCell>}
                   {columns.isVisible("signedAt") && <TableCell className="text-sm text-slate-500 dark:text-muted-foreground">{fmtDate(customer.signed_at)}</TableCell>}
                 </TableRow>
               );

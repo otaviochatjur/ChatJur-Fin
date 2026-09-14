@@ -31,6 +31,20 @@ test('falls back to the subscription\'s own actor_id when it carries no payment 
   assert.equal(metrics[actor.id].clients, 1);
 });
 
+test('a partner assigned directly to the customer overrides the payment-link attribution', () => {
+  const otherActor = { id: 'other-partner', role: 'PARTNER', name: 'Outro parceiro', status: 'ACTIVE' };
+  const subscription = { id: 'sub-direct', customer_id: 'cust-direct', payment_link_id: 'link-other', actor_id: otherActor.id, value: 600, billing_period: 'MONTHLY', status: 'ACTIVE' };
+  const link = { id: 'link-other', actor_id: otherActor.id, status: 'ACTIVE' };
+  const customer = { id: 'cust-direct', acquisition_actor_id: actor.id };
+
+  const metrics = computeActorMetrics([actor, otherActor], [subscription], [link], [customer]);
+
+  assert.equal(metrics[actor.id].clients, 1);
+  assert.equal(metrics[actor.id].mrr, 600);
+  assert.equal(metrics[otherActor.id].clients, 0);
+  assert.equal(metrics[otherActor.id].mrr, 0);
+});
+
 
 test('linked clients include unconfirmed subscriptions without counting them as active or adding MRR', () => {
   const base = { payment_link_id: 'link', value: 500, billing_period: 'MONTHLY', actor_id: null };

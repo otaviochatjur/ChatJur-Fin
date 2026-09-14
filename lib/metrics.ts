@@ -419,17 +419,20 @@ export const money = new Intl.NumberFormat("pt-BR", { style: "currency", currenc
  * "paid" status comes in), and "clients" counts all distinct linked customers. Active customers stay
  * separate for Plus eligibility; unconfirmed subscriptions never add MRR.
  *
- * A subscription's own `actor_id` is only a snapshot taken when the row was
- * created (`lib/payment-sync.ts` never patches it afterwards). The link's
- * `actor_id` is the live, authoritative attribution — the same one
- * `display_actor_id` (see `lib/subscription-presentation.ts`) already
- * trusts — so a subscription whose link was attributed to a partner *after*
- * the subscription existed (e.g. a legacy-import backfill) still counts
- * here, matching what already happens for the "Links" count above.
+ * A partner assigned directly to the customer is the authoritative
+ * attribution. When the customer has no direct assignment, the current
+ * payment-link attribution is used, with the subscription snapshot as the
+ * final fallback for legacy/manual rows.
  */
-export function computeActorMetrics(actors: CommercialActor[], subscriptions: Subscription[], links: PaymentLink[]): Record<string, ActorMetrics> {
+export function computeActorMetrics(
+  actors: CommercialActor[],
+  subscriptions: Subscription[],
+  links: PaymentLink[],
+  customers: Pick<Customer, "id" | "acquisition_actor_id">[] = [],
+): Record<string, ActorMetrics> {
   const metrics: Record<string, ActorMetrics> = Object.fromEntries(actors.map((actor) => [actor.id, { clients: 0, activeClients: 0, mrr: 0, links: 0 }]));
   const linksById = new Map(links.map((link) => [link.id, link]));
+  const customerActorById = new Map(customers.map((customer) => [customer.id, customer.acquisition_actor_id]));
 
   for (const link of links) {
     if (link.status !== "ACTIVE" || !link.actor_id) continue;
@@ -441,7 +444,7 @@ export function computeActorMetrics(actors: CommercialActor[], subscriptions: Su
   const customersByActor = new Map<string, Set<string>>();
   for (const subscription of subscriptions) {
     const link = subscription.payment_link_id ? linksById.get(subscription.payment_link_id) : undefined;
-    const actorId = link ? link.actor_id : subscription.actor_id;
+    const actorId = customerActorById.get(subscription.customer_id) ?? link?.actor_id ?? subscription.actor_id;
     if (!actorId) continue;
     const entry = metrics[actorId];
     if (!entry) continue;
