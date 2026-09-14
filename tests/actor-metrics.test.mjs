@@ -6,6 +6,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const vite = await createServer({ appType: 'custom', configFile: false, root, cacheDir: 'node_modules/.vite-tests/actor-metrics', resolve: { alias: { '@': root } }, server: { middlewareMode: true, hmr: false }, optimizeDeps: { noDiscovery: true, include: [] } });
 after(() => vite.close());
 const { computeActorMetrics, computeActorPayout, computeActorPayoutDetail } = await vite.ssrLoadModule('/lib/metrics.ts');
+const { payoutPeriodWindow } = await vite.ssrLoadModule('/lib/payout-period.ts');
 
 const actor = { id: 'calculo-juridico', role: 'INSTITUTIONAL', name: 'Cálculo Jurídico', status: 'ACTIVE' };
 
@@ -68,4 +69,10 @@ test('repasse uses the partner assigned directly to the customer before link and
   assert.equal(detail.length, 1);
   assert.equal(otherPayout.grossReceived, 0);
   assert.equal(otherPayout.commission, 0);
+});
+
+test('repasse month uses payments through day 30 of the previous month', () => {
+  assert.deepEqual(payoutPeriodWindow('2026-09'), { competencePeriod: '2026-08', start: '2026-08-01', cutoff: '2026-08-30', endExclusive: '2026-08-31' });
+  assert.deepEqual(payoutPeriodWindow('2027-03'), { competencePeriod: '2027-02', start: '2027-02-01', cutoff: '2027-02-28', endExclusive: '2027-03-01' });
+  assert.deepEqual(payoutPeriodWindow('2026-01'), { competencePeriod: '2025-12', start: '2025-12-01', cutoff: '2025-12-30', endExclusive: '2025-12-31' });
 });

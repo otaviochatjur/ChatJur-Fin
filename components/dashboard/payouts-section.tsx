@@ -13,6 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ColumnVisibilityMenu, ResizableTh, useTableSort, useColumnVisibility, useColumnWidths, type ColumnDef } from "@/components/dashboard/table-toolbar";
 import { downloadBrandedPdf, downloadBrandedXlsx, seededRandom } from "@/lib/reports";
+import { payoutPeriodWindow } from "@/lib/payout-period";
 import {
   computeActorPayout,
   computeActorPayoutDetail,
@@ -56,6 +57,11 @@ function periodLabel(period: string) {
   const [year, month] = period.split("-").map(Number);
   const label = new Date(year, month - 1, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
   return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function dateLabel(value: string) {
+  const [year, month, day] = value.split("-");
+  return `${day}/${month}/${year}`;
 }
 
 function slugify(value: string) {
@@ -179,7 +185,7 @@ export function PayoutsSection({ actors, subscriptions, customers, links }: { ac
   useEffect(() => {
     let cancelled = false;
     async function loadPeriodPayments() {
-      const response = await fetch(`/api/payments?period=${encodeURIComponent(period)}`, { cache: "no-store" });
+      const response = await fetch(`/api/payments?payoutPeriod=${encodeURIComponent(period)}`, { cache: "no-store" });
       const data = await response.json();
       if (cancelled) return;
       if (!response.ok) {
@@ -195,15 +201,16 @@ export function PayoutsSection({ actors, subscriptions, customers, links }: { ac
 
   const actorsForRole = useMemo(() => actors.filter((actor) => actor.role === role), [actors, role]);
   const referenceMonth = `${period}-01`;
+  const paymentWindow = useMemo(() => payoutPeriodWindow(period), [period]);
   const attribution = useMemo(() => ({ customers, links }), [customers, links]);
   const periodLoading = periodData.period !== period;
   const payments = useMemo(() => periodLoading ? [] : periodData.payments, [periodData.payments, periodLoading]);
 
   const rows = useMemo(() => actorsForRole.map((actor) => {
-    const computed = computeActorPayout(actor.id, period, subscriptions, payments, rates, attribution);
+    const computed = computeActorPayout(actor.id, paymentWindow.competencePeriod, subscriptions, payments, rates, attribution);
     const paidRecord = payouts.find((payout) => payout.actor_id === actor.id && payout.reference_month === referenceMonth) ?? null;
     return { actor, computed, paidRecord };
-  }), [actorsForRole, period, subscriptions, payments, rates, payouts, referenceMonth, attribution]);
+  }), [actorsForRole, subscriptions, payments, rates, payouts, referenceMonth, attribution, paymentWindow.competencePeriod]);
 
   const totalComputed = rows.reduce((sum, row) => sum + row.computed.commission, 0);
   const totalPaid = rows.reduce((sum, row) => sum + (row.paidRecord ? row.paidRecord.amount : 0), 0);
@@ -291,7 +298,7 @@ export function PayoutsSection({ actors, subscriptions, customers, links }: { ac
           "Dados fictícios — cadastro real ainda não preenchido",
         ]);
       } else {
-        const computed = computeActorPayout(actor.id, period, subscriptions, payments, rates, attribution);
+        const computed = computeActorPayout(actor.id, paymentWindow.competencePeriod, subscriptions, payments, rates, attribution);
         const paid = payouts.find((payout) => payout.actor_id === actor.id && payout.reference_month === referenceMonth) ?? null;
         totalCommission += computed.commission;
         totalPaid += paid ? paid.amount : 0;
@@ -305,7 +312,7 @@ export function PayoutsSection({ actors, subscriptions, customers, links }: { ac
     }
 
     const totalsRow = ["Total", "", "", "", "", "", "", "", "", money.format(totalCommission), "", money.format(totalPaid), "", ""];
-    const subtitle = `${periodLabel(period)} · ${targets.length} cadastro(s)${demoMode ? ` · ${rolePluralLabels[role]}` : ""}`;
+    const subtitle = `${periodLabel(period)} · recebimentos de ${dateLabel(paymentWindow.start)} a ${dateLabel(paymentWindow.cutoff)} · ${targets.length} cadastro(s)${demoMode ? ` · ${rolePluralLabels[role]}` : ""}`;
     const footNote = "Anual: comissão = 1/12 do valor do plano por mês ativo do ciclo, independente do número de parcelas escolhido pelo cliente. Mensal: comissão só no mês em que o pagamento é confirmado.";
     const filenameBase = `repasses-contabilidade-${period}${demoMode ? "-exemplo" : ""}`;
 
@@ -353,7 +360,7 @@ export function PayoutsSection({ actors, subscriptions, customers, links }: { ac
             dataRows.push([item.customerName, item.planName, item.billingLabel, money.format(item.subscriptionValue), money.format(item.commissionBase), `${item.ratePercent}%`, money.format(item.commission), item.paymentDate.toLocaleDateString("pt-BR")]);
           }
         } else {
-          const items = computeActorPayoutDetail(actor.id, period, subscriptions, payments, rates, attribution);
+          const items = computeActorPayoutDetail(actor.id, paymentWindow.competencePeriod, subscriptions, payments, rates, attribution);
           for (const item of items) {
             const customer = customers.find((candidate) => candidate.id === item.customerId);
             totalCommission += item.commission;
@@ -367,7 +374,7 @@ export function PayoutsSection({ actors, subscriptions, customers, links }: { ac
         }
 
         const totalsRow = ["Total do período", "", "", "", "", "", money.format(totalCommission), ""];
-        const subtitle = `${actor.name} · ${roleLabels[actor.role]} · ${periodLabel(period)}`;
+        const subtitle = `${actor.name} · ${roleLabels[actor.role]} · ${periodLabel(period)} · recebimentos de ${dateLabel(paymentWindow.start)} a ${dateLabel(paymentWindow.cutoff)}`;
         const filenameBase = `repasse-${slugify(actor.name)}-${period}${demoMode ? "-exemplo" : ""}`;
 
         if (reportFormat === "pdf") {
@@ -401,6 +408,7 @@ export function PayoutsSection({ actors, subscriptions, customers, links }: { ac
           <Input type="month" value={period} onChange={(event) => setPeriod(event.target.value)} className="w-40" />
           {periodLoading && <span className="text-xs text-slate-400">Carregando pagamentos…</span>}
         </label>
+        <p className="w-full text-right text-xs text-slate-500 dark:text-muted-foreground">Base do cálculo: recebimentos de {dateLabel(paymentWindow.start)} a {dateLabel(paymentWindow.cutoff)}.</p>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-3">

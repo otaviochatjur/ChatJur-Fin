@@ -1,8 +1,21 @@
 import { supabaseRequest } from "@/lib/supabase-server";
+import { payoutPeriodWindow } from "@/lib/payout-period";
 
 export async function GET(request: Request) {
   try {
     const params = new URL(request.url).searchParams;
+    const payoutPeriod = params.get("payoutPeriod");
+    if (payoutPeriod) {
+      let window;
+      try { window = payoutPeriodWindow(payoutPeriod); }
+      catch { return Response.json({ error: "Período inválido." }, { status: 400 }); }
+      const select = "select=id,subscription_id,payment_link_id,asaas_payment_id,asaas_payment_link_id,customer_id,status,value,net_value,billing_type,due_date,payment_date,confirmed_date,refunded_at,created_at";
+      const [paidOnDate, confirmedWithoutPaymentDate] = await Promise.all([
+        supabaseRequest<unknown[]>(`/rest/v1/payments?${select}&payment_date=gte.${window.start}&payment_date=lt.${window.endExclusive}&order=payment_date.desc&limit=5000`),
+        supabaseRequest<unknown[]>(`/rest/v1/payments?${select}&payment_date=is.null&confirmed_date=gte.${window.start}&confirmed_date=lt.${window.endExclusive}&order=confirmed_date.desc&limit=5000`),
+      ]);
+      return Response.json({ payments: [...paidOnDate, ...confirmedWithoutPaymentDate], window });
+    }
     const period = params.get("period");
     if (period && !/^\d{4}-\d{2}$/.test(period)) return Response.json({ error: "Período inválido." }, { status: 400 });
     if (period) {
