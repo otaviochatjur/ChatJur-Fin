@@ -187,13 +187,13 @@ test("payment sync replaces a future pending cycle date with the first real paym
         if (table === "asaas_customer_exclusions") return Response.json([]);
         if (table === "customers") return Response.json([{ id: "customer", asaas_customer_id: "asaas-customer", acquisition_actor_id: null, status: "ACTIVE" }]);
         if (table === "payment_links") return Response.json([{ id: "link", actor_id: null, plan_id: "plan", custom_plan_id: null, display_name: "Plano anual", billing_period: "ANNUAL", value: 4970, plans: { kind: "RECURRING" } }]);
-        if (table === "subscriptions") return Response.json([{ id: "subscription", status: null, status_manually_set: false, asaas_subscription_id: null, asaas_installment_id: "installment", started_at: "2026-10-04" }]);
+        if (table === "subscriptions") return Response.json([{ id: "subscription", status: null, status_manually_set: false, asaas_subscription_id: null, asaas_installment_id: "installment", started_at: "2026-10-04", billing_period: "ANNUAL" }]);
         if (table === "payments") return Response.json([]);
       }
       const body = JSON.parse(options.body);
       if (table === "subscriptions") {
         subscriptionPatch = body;
-        return Response.json([{ id: "subscription", status: "ACTIVE", asaas_subscription_id: null, asaas_installment_id: "installment", started_at: body.started_at }]);
+        return Response.json([{ id: "subscription", status: "ACTIVE", asaas_subscription_id: null, asaas_installment_id: "installment", started_at: body.started_at, billing_period: "ANNUAL" }]);
       }
       if (table === "payments") return Response.json([]);
       throw new Error(`Unexpected request ${table}`);
@@ -212,6 +212,51 @@ test("payment sync replaces a future pending cycle date with the first real paym
 
     assert.equal(subscriptionPatch.started_at, "2026-04-30");
     assert.equal(subscriptionPatch.status, "ACTIVE");
+  } finally {
+    globalThis.fetch = previousFetch;
+    for (const key of ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"]) {
+      if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key];
+    }
+  }
+});
+
+test("annual payment sync advances to a paid renewal cycle and ignores an older cycle revisited later", async () => {
+  const { withWebhookTenant } = await vite.ssrLoadModule("/lib/tenant-server.ts");
+  const { syncAsaasPayment } = await vite.ssrLoadModule("/lib/payment-sync.ts");
+  const previousFetch = globalThis.fetch;
+  const previous = { ...process.env };
+  Object.assign(process.env, { SUPABASE_URL: "https://db.invalid", SUPABASE_SERVICE_ROLE_KEY: "test" });
+  const patches = [];
+  const stored = { id: "subscription", status: "ACTIVE", status_manually_set: false, asaas_subscription_id: null, asaas_installment_id: "old-cycle", started_at: "2025-07-23", billing_period: "ANNUAL" };
+  try {
+    globalThis.fetch = async (input, options = {}) => {
+      const url = new URL(input);
+      const table = url.pathname.split("/").at(-1);
+      if ((options.method ?? "GET") === "GET") {
+        if (table === "asaas_customer_exclusions") return Response.json([]);
+        if (table === "customers") return Response.json([{ id: "customer", asaas_customer_id: "asaas-customer", acquisition_actor_id: null, status: "ACTIVE" }]);
+        if (table === "payment_links") return Response.json([{ id: "link", actor_id: null, plan_id: "plan", custom_plan_id: null, display_name: "Plano anual", billing_period: "ANNUAL", value: 4176, plans: { kind: "RECURRING" } }]);
+        if (table === "subscriptions") return Response.json([stored]);
+        if (table === "payments") return Response.json([]);
+      }
+      const body = JSON.parse(options.body);
+      if (table === "subscriptions") {
+        patches.push(body);
+        Object.assign(stored, body);
+        return Response.json([stored]);
+      }
+      if (table === "payments") return Response.json([]);
+      throw new Error(`Unexpected request ${table}`);
+    };
+
+    await withWebhookTenant({ id: "tenant-renewal-cycle", legacy: false }, () => syncAsaasPayment({ id: "renewal-payment", customer: "asaas-customer", installment: "new-cycle", paymentLink: "asaas-link", value: 696, status: "RECEIVED", paymentDate: "2026-06-06" }));
+    await withWebhookTenant({ id: "tenant-renewal-cycle", legacy: false }, () => syncAsaasPayment({ id: "old-payment", customer: "asaas-customer", installment: "old-cycle", paymentLink: "asaas-link", value: 696, status: "RECEIVED", paymentDate: "2025-08-23" }));
+
+    assert.equal(patches[0].asaas_installment_id, "new-cycle");
+    assert.equal(patches[0].started_at, "2026-06-06");
+    assert.equal(stored.asaas_installment_id, "new-cycle");
+    assert.equal(stored.started_at, "2026-06-06");
+    assert.equal(patches.length, 1);
   } finally {
     globalThis.fetch = previousFetch;
     for (const key of ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"]) {

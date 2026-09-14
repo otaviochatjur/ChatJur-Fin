@@ -17,7 +17,7 @@ type PaymentLinkRow = {
   plan_kind: Plan["kind"] | null;
 };
 type CustomerRow = StoredAsaasCustomer;
-type SubscriptionRow = { id: string; status: string | null; status_manually_set?: boolean; asaas_subscription_id: string | null; asaas_installment_id: string | null; started_at: string | null };
+type SubscriptionRow = { id: string; status: string | null; status_manually_set?: boolean; asaas_subscription_id: string | null; asaas_installment_id: string | null; started_at: string | null; billing_period: "MONTHLY" | "ANNUAL" };
 /** Full shape needed to keep tracking a subscription whose payments stopped carrying a `paymentLink` (see `resolveOrphanSubscription`). */
 type SubscriptionFullRow = SubscriptionRow & {
   customer_id: string;
@@ -26,7 +26,6 @@ type SubscriptionFullRow = SubscriptionRow & {
   plan_name_raw: string | null;
   payment_link_id: string | null;
   actor_id: string | null;
-  billing_period: "MONTHLY" | "ANNUAL";
   value: number;
 };
 const SUBSCRIPTION_FULL_SELECT = "id,status,status_manually_set,asaas_subscription_id,asaas_installment_id,started_at,customer_id,plan_id,custom_plan_id,plan_name_raw,payment_link_id,actor_id,billing_period,value";
@@ -145,7 +144,7 @@ async function resolveCustomer(payment: AsaasPayment, actorId: string | null): P
 
 async function resolveSubscription(payment: AsaasPayment, link: PaymentLinkRow, customer: CustomerRow): Promise<SubscriptionRow> {
   const paidAt = payment.paymentDate ?? payment.clientPaymentDate ?? payment.confirmedDate ?? null;
-  const subscriptionSelect = "id,status,status_manually_set,asaas_subscription_id,asaas_installment_id,started_at";
+  const subscriptionSelect = "id,status,status_manually_set,asaas_subscription_id,asaas_installment_id,started_at,billing_period";
   let existing: SubscriptionRow | null = null;
   if (payment.subscription) {
     existing = await findOne<SubscriptionRow>(`/rest/v1/subscriptions?select=${subscriptionSelect}&asaas_subscription_id=eq.${encodeURIComponent(payment.subscription)}`);
@@ -187,13 +186,25 @@ async function resolveSubscription(payment: AsaasPayment, link: PaymentLinkRow, 
 
   if (existing) {
     const patch: Record<string, unknown> = {};
-    if (payment.subscription && payment.subscription !== existing.asaas_subscription_id) patch.asaas_subscription_id = payment.subscription;
-    if (payment.installment && payment.installment !== existing.asaas_installment_id) patch.asaas_installment_id = payment.installment;
+    const paymentCycleId = payment.installment ? `installment:${payment.installment}` : payment.subscription ? `subscription:${payment.subscription}` : null;
+    const existingCycleId = existing.asaas_installment_id ? `installment:${existing.asaas_installment_id}` : existing.asaas_subscription_id ? `subscription:${existing.asaas_subscription_id}` : null;
+    const sameCycle = Boolean(paymentCycleId && existingCycleId && paymentCycleId === existingCycleId);
+    const laterPaidCycle = Boolean(paymentCycleId && existingCycleId && paymentCycleId !== existingCycleId && paidAt && (!existing.started_at || paidAt > existing.started_at));
+    // Annual full-history scans may revisit an older installment after the
+    // current renewal. Only adopt a different cycle id when its first real
+    // payment is later than the cycle already stored.
+    const canAdoptCycle = existing.billing_period !== "ANNUAL" || !existingCycleId || sameCycle || laterPaidCycle;
+    if (canAdoptCycle && payment.subscription && payment.subscription !== existing.asaas_subscription_id) patch.asaas_subscription_id = payment.subscription;
+    if (canAdoptCycle && payment.installment && payment.installment !== existing.asaas_installment_id) patch.asaas_installment_id = payment.installment;
     if (PAID_STATUSES.has(payment.status) && !existing.status_manually_set && existing.status !== "ACTIVE") patch.status = "ACTIVE";
     // A pending future installment may be encountered before the historical
     // paid installments during a full Asaas scan. The annual cycle starts on
     // the first real payment, never on that future due date.
-    if (PAID_STATUSES.has(payment.status) && paidAt && (!existing.started_at || paidAt < existing.started_at)) patch.started_at = paidAt;
+    if (PAID_STATUSES.has(payment.status) && paidAt && (
+      !existing.started_at
+      || (sameCycle && paidAt < existing.started_at)
+      || (existing.billing_period === "ANNUAL" && laterPaidCycle)
+    )) patch.started_at = paidAt;
     if (Object.keys(patch).length > 0) {
       const [updated] = await supabaseRequest<SubscriptionRow[]>(`/rest/v1/subscriptions?id=eq.${existing.id}`, {
         method: "PATCH",
