@@ -17,7 +17,7 @@ type PaymentLinkRow = {
   plan_kind: Plan["kind"] | null;
 };
 type CustomerRow = StoredAsaasCustomer;
-type SubscriptionRow = { id: string; status: string | null; status_manually_set?: boolean; asaas_subscription_id: string | null; asaas_installment_id: string | null };
+type SubscriptionRow = { id: string; status: string | null; status_manually_set?: boolean; asaas_subscription_id: string | null; asaas_installment_id: string | null; started_at: string | null };
 /** Full shape needed to keep tracking a subscription whose payments stopped carrying a `paymentLink` (see `resolveOrphanSubscription`). */
 type SubscriptionFullRow = SubscriptionRow & {
   customer_id: string;
@@ -29,7 +29,7 @@ type SubscriptionFullRow = SubscriptionRow & {
   billing_period: "MONTHLY" | "ANNUAL";
   value: number;
 };
-const SUBSCRIPTION_FULL_SELECT = "id,status,status_manually_set,asaas_subscription_id,asaas_installment_id,customer_id,plan_id,custom_plan_id,plan_name_raw,payment_link_id,actor_id,billing_period,value";
+const SUBSCRIPTION_FULL_SELECT = "id,status,status_manually_set,asaas_subscription_id,asaas_installment_id,started_at,customer_id,plan_id,custom_plan_id,plan_name_raw,payment_link_id,actor_id,billing_period,value";
 
 const PAID_STATUSES = new Set(["RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH"]);
 
@@ -144,11 +144,13 @@ async function resolveCustomer(payment: AsaasPayment, actorId: string | null): P
 }
 
 async function resolveSubscription(payment: AsaasPayment, link: PaymentLinkRow, customer: CustomerRow): Promise<SubscriptionRow> {
+  const paidAt = payment.paymentDate ?? payment.clientPaymentDate ?? payment.confirmedDate ?? null;
+  const subscriptionSelect = "id,status,status_manually_set,asaas_subscription_id,asaas_installment_id,started_at";
   let existing: SubscriptionRow | null = null;
   if (payment.subscription) {
-    existing = await findOne<SubscriptionRow>(`/rest/v1/subscriptions?select=id,status,status_manually_set,asaas_subscription_id,asaas_installment_id&asaas_subscription_id=eq.${encodeURIComponent(payment.subscription)}`);
+    existing = await findOne<SubscriptionRow>(`/rest/v1/subscriptions?select=${subscriptionSelect}&asaas_subscription_id=eq.${encodeURIComponent(payment.subscription)}`);
   } else if (payment.installment) {
-    existing = await findOne<SubscriptionRow>(`/rest/v1/subscriptions?select=id,status,status_manually_set,asaas_subscription_id,asaas_installment_id&asaas_installment_id=eq.${encodeURIComponent(payment.installment)}`);
+    existing = await findOne<SubscriptionRow>(`/rest/v1/subscriptions?select=${subscriptionSelect}&asaas_installment_id=eq.${encodeURIComponent(payment.installment)}`);
   }
   // Either this payment carries no subscription/installment id at all (the
   // very first payment on a link, before Asaas assigns one), or it carries
@@ -164,7 +166,7 @@ async function resolveSubscription(payment: AsaasPayment, link: PaymentLinkRow, 
   // the payments, discovered across two separate rescans).
   if (!existing) {
     const candidates = await supabaseRequest<SubscriptionRow[]>(
-      `/rest/v1/subscriptions?select=id,status,status_manually_set,asaas_subscription_id,asaas_installment_id&customer_id=eq.${customer.id}&payment_link_id=eq.${link.id}&or=(status.neq.CANCELLED,status_manually_set.eq.true)`,
+      `/rest/v1/subscriptions?select=${subscriptionSelect}&customer_id=eq.${customer.id}&payment_link_id=eq.${link.id}&or=(status.neq.CANCELLED,status_manually_set.eq.true)`,
     );
     if (candidates.length === 1) {
       existing = candidates[0];
@@ -188,6 +190,10 @@ async function resolveSubscription(payment: AsaasPayment, link: PaymentLinkRow, 
     if (payment.subscription && payment.subscription !== existing.asaas_subscription_id) patch.asaas_subscription_id = payment.subscription;
     if (payment.installment && payment.installment !== existing.asaas_installment_id) patch.asaas_installment_id = payment.installment;
     if (PAID_STATUSES.has(payment.status) && !existing.status_manually_set && existing.status !== "ACTIVE") patch.status = "ACTIVE";
+    // A pending future installment may be encountered before the historical
+    // paid installments during a full Asaas scan. The annual cycle starts on
+    // the first real payment, never on that future due date.
+    if (PAID_STATUSES.has(payment.status) && paidAt && (!existing.started_at || paidAt < existing.started_at)) patch.started_at = paidAt;
     if (Object.keys(patch).length > 0) {
       const [updated] = await supabaseRequest<SubscriptionRow[]>(`/rest/v1/subscriptions?id=eq.${existing.id}`, {
         method: "PATCH",
@@ -228,7 +234,7 @@ async function resolveSubscription(payment: AsaasPayment, link: PaymentLinkRow, 
       status: PAID_STATUSES.has(payment.status) ? "ACTIVE" : null,
       asaas_subscription_id: payment.subscription ?? null,
       asaas_installment_id: payment.installment ?? null,
-      started_at: payment.paymentDate ?? payment.dueDate ?? new Date().toISOString().slice(0, 10),
+      started_at: PAID_STATUSES.has(payment.status) ? (paidAt ?? payment.dueDate ?? new Date().toISOString().slice(0, 10)) : null,
       source: "SYSTEM",
     },
   });

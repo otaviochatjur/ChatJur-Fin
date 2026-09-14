@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const vite = await createServer({ appType: 'custom', configFile: false, root, cacheDir: 'node_modules/.vite-tests/actor-metrics', resolve: { alias: { '@': root } }, server: { middlewareMode: true, hmr: false }, optimizeDeps: { noDiscovery: true, include: [] } });
 after(() => vite.close());
-const { computeActorMetrics } = await vite.ssrLoadModule('/lib/metrics.ts');
+const { computeActorMetrics, computeActorPayout, computeActorPayoutDetail } = await vite.ssrLoadModule('/lib/metrics.ts');
 
 const actor = { id: 'calculo-juridico', role: 'INSTITUTIONAL', name: 'Cálculo Jurídico', status: 'ACTIVE' };
 
@@ -50,4 +50,22 @@ test('linked clients include unconfirmed subscriptions without counting them as 
   const base = { payment_link_id: 'link', value: 500, billing_period: 'MONTHLY', actor_id: null };
   const result = computeActorMetrics([actor], [{...base,id:'a',customer_id:'c',status:null},{...base,id:'b',customer_id:'c',status:'ACTIVE'},{...base,id:'d',customer_id:'d',status:null}], [{id:'link',actor_id:actor.id,status:'ACTIVE'}])[actor.id];
   assert.equal(result.clients,2);assert.equal(result.activeClients,1);assert.equal(result.mrr,500);
+});
+
+test('repasse uses the partner assigned directly to the customer before link and subscription attribution', () => {
+  const otherActor = { id: 'other-partner', role: 'PARTNER', name: 'Outro parceiro', status: 'ACTIVE' };
+  const subscription = { id: 'sub-payout', customer_id: 'cust-payout', payment_link_id: 'link-payout', actor_id: otherActor.id, plan_id: 'plan', custom_plan_id: null, plan_name_raw: 'Plano mensal', value: 500, billing_period: 'MONTHLY', status: 'ACTIVE' };
+  const payment = { subscription_id: subscription.id, status: 'RECEIVED', value: 500, payment_date: '2026-09-10', confirmed_date: null };
+  const rates = [{ actor_id: actor.id, plan_id: null, custom_plan_id: null, rate_percent: 10 }];
+  const attribution = { customers: [{ id: subscription.customer_id, acquisition_actor_id: actor.id }], links: [{ id: subscription.payment_link_id, actor_id: otherActor.id }] };
+
+  const payout = computeActorPayout(actor.id, '2026-09', [subscription], [payment], rates, attribution);
+  const otherPayout = computeActorPayout(otherActor.id, '2026-09', [subscription], [payment], rates, attribution);
+  const detail = computeActorPayoutDetail(actor.id, '2026-09', [subscription], [payment], rates, attribution);
+
+  assert.equal(payout.grossReceived, 500);
+  assert.equal(payout.commission, 50);
+  assert.equal(detail.length, 1);
+  assert.equal(otherPayout.grossReceived, 0);
+  assert.equal(otherPayout.commission, 0);
 });

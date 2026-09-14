@@ -24,6 +24,7 @@ import {
   type CommissionRate,
   type Customer,
   type Payment,
+  type PaymentLink,
   type Subscription,
 } from "@/lib/metrics";
 
@@ -138,7 +139,7 @@ function buildDemoPartnerItems(actor: CommercialActor) {
  * report's layout before every partner's banking/commission data is filled
  * in. It never writes anything to Supabase.
  */
-export function PayoutsSection({ actors, subscriptions, payments, customers }: { actors: CommercialActor[]; subscriptions: Subscription[]; payments: Payment[]; customers: Customer[] }) {
+export function PayoutsSection({ actors, subscriptions, payments, customers, links }: { actors: CommercialActor[]; subscriptions: Subscription[]; payments: Payment[]; customers: Customer[]; links: PaymentLink[] }) {
   const [role, setRole] = useState<(typeof ROLE_TABS)[number]>("PARTNER");
   const [period, setPeriod] = useState(currentPeriod());
   const [rates, setRates] = useState<CommissionRate[]>([]);
@@ -176,12 +177,13 @@ export function PayoutsSection({ actors, subscriptions, payments, customers }: {
 
   const actorsForRole = useMemo(() => actors.filter((actor) => actor.role === role), [actors, role]);
   const referenceMonth = `${period}-01`;
+  const attribution = useMemo(() => ({ customers, links }), [customers, links]);
 
   const rows = useMemo(() => actorsForRole.map((actor) => {
-    const computed = computeActorPayout(actor.id, period, subscriptions, payments, rates);
+    const computed = computeActorPayout(actor.id, period, subscriptions, payments, rates, attribution);
     const paidRecord = payouts.find((payout) => payout.actor_id === actor.id && payout.reference_month === referenceMonth) ?? null;
     return { actor, computed, paidRecord };
-  }), [actorsForRole, period, subscriptions, payments, rates, payouts, referenceMonth]);
+  }), [actorsForRole, period, subscriptions, payments, rates, payouts, referenceMonth, attribution]);
 
   const totalComputed = rows.reduce((sum, row) => sum + row.computed.commission, 0);
   const totalPaid = rows.reduce((sum, row) => sum + (row.paidRecord ? row.paidRecord.amount : 0), 0);
@@ -269,7 +271,7 @@ export function PayoutsSection({ actors, subscriptions, payments, customers }: {
           "Dados fictícios — cadastro real ainda não preenchido",
         ]);
       } else {
-        const computed = computeActorPayout(actor.id, period, subscriptions, payments, rates);
+        const computed = computeActorPayout(actor.id, period, subscriptions, payments, rates, attribution);
         const paid = payouts.find((payout) => payout.actor_id === actor.id && payout.reference_month === referenceMonth) ?? null;
         totalCommission += computed.commission;
         totalPaid += paid ? paid.amount : 0;
@@ -331,7 +333,7 @@ export function PayoutsSection({ actors, subscriptions, payments, customers }: {
             dataRows.push([item.customerName, item.planName, item.billingLabel, money.format(item.subscriptionValue), money.format(item.commissionBase), `${item.ratePercent}%`, money.format(item.commission), item.paymentDate.toLocaleDateString("pt-BR")]);
           }
         } else {
-          const items = computeActorPayoutDetail(actor.id, period, subscriptions, payments, rates);
+          const items = computeActorPayoutDetail(actor.id, period, subscriptions, payments, rates, attribution);
           for (const item of items) {
             const customer = customers.find((candidate) => candidate.id === item.customerId);
             totalCommission += item.commission;

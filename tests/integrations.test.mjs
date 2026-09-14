@@ -162,7 +162,56 @@ test("pending or refunded payments never freeze a subscription automatically", a
         status: paymentStatus,
       }));
       assert.equal(createdSubscription.status, null);
+      assert.equal(createdSubscription.started_at, null);
     }
+  } finally {
+    globalThis.fetch = previousFetch;
+    for (const key of ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"]) {
+      if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key];
+    }
+  }
+});
+
+test("payment sync replaces a future pending cycle date with the first real payment date", async () => {
+  const { withWebhookTenant } = await vite.ssrLoadModule("/lib/tenant-server.ts");
+  const { syncAsaasPayment } = await vite.ssrLoadModule("/lib/payment-sync.ts");
+  const previousFetch = globalThis.fetch;
+  const previous = { ...process.env };
+  Object.assign(process.env, { SUPABASE_URL: "https://db.invalid", SUPABASE_SERVICE_ROLE_KEY: "test" });
+  let subscriptionPatch;
+  try {
+    globalThis.fetch = async (input, options = {}) => {
+      const url = new URL(input);
+      const table = url.pathname.split("/").at(-1);
+      if ((options.method ?? "GET") === "GET") {
+        if (table === "asaas_customer_exclusions") return Response.json([]);
+        if (table === "customers") return Response.json([{ id: "customer", asaas_customer_id: "asaas-customer", acquisition_actor_id: null, status: "ACTIVE" }]);
+        if (table === "payment_links") return Response.json([{ id: "link", actor_id: null, plan_id: "plan", custom_plan_id: null, display_name: "Plano anual", billing_period: "ANNUAL", value: 4970, plans: { kind: "RECURRING" } }]);
+        if (table === "subscriptions") return Response.json([{ id: "subscription", status: null, status_manually_set: false, asaas_subscription_id: null, asaas_installment_id: "installment", started_at: "2026-10-04" }]);
+        if (table === "payments") return Response.json([]);
+      }
+      const body = JSON.parse(options.body);
+      if (table === "subscriptions") {
+        subscriptionPatch = body;
+        return Response.json([{ id: "subscription", status: "ACTIVE", asaas_subscription_id: null, asaas_installment_id: "installment", started_at: body.started_at }]);
+      }
+      if (table === "payments") return Response.json([]);
+      throw new Error(`Unexpected request ${table}`);
+    };
+
+    await withWebhookTenant({ id: "tenant-cycle-date", legacy: false }, () => syncAsaasPayment({
+      id: "paid-installment",
+      customer: "asaas-customer",
+      installment: "installment",
+      paymentLink: "asaas-link",
+      value: 828.33,
+      status: "RECEIVED",
+      paymentDate: "2026-04-30",
+      dueDate: "2026-05-04",
+    }));
+
+    assert.equal(subscriptionPatch.started_at, "2026-04-30");
+    assert.equal(subscriptionPatch.status, "ACTIVE");
   } finally {
     globalThis.fetch = previousFetch;
     for (const key of ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"]) {

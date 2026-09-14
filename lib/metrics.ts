@@ -531,6 +531,20 @@ export type PayoutLineItem = {
   paymentDate: string | null;
 };
 
+type PayoutAttributionContext = {
+  customers?: Pick<Customer, "id" | "acquisition_actor_id">[];
+  links?: Pick<PaymentLink, "id" | "actor_id">[];
+};
+
+function payoutActorForSubscription(
+  subscription: Subscription,
+  customerActorById: Map<string, string | null>,
+  linksById: Map<string, Pick<PaymentLink, "id" | "actor_id">>,
+) {
+  const linkActorId = subscription.payment_link_id ? linksById.get(subscription.payment_link_id)?.actor_id : null;
+  return customerActorById.get(subscription.customer_id) ?? linkActorId ?? subscription.actor_id;
+}
+
 /**
  * Per-subscription breakdown of one actor's repasse for one "YYYY-MM"
  * period.
@@ -548,10 +562,19 @@ export type PayoutLineItem = {
  * `computeActorPayout` (below) is just this list aggregated; both stay in
  * lockstep because the aggregate is derived from these same line items.
  */
-export function computeActorPayoutDetail(actorId: string, period: string, subscriptions: Subscription[], payments: Payment[], rates: CommissionRate[]): PayoutLineItem[] {
+export function computeActorPayoutDetail(
+  actorId: string,
+  period: string,
+  subscriptions: Subscription[],
+  payments: Payment[],
+  rates: CommissionRate[],
+  attribution: PayoutAttributionContext = {},
+): PayoutLineItem[] {
   const items: PayoutLineItem[] = [];
+  const customerActorById = new Map((attribution.customers ?? []).map((customer) => [customer.id, customer.acquisition_actor_id]));
+  const linksById = new Map((attribution.links ?? []).map((link) => [link.id, link]));
   for (const subscription of subscriptions) {
-    if (subscription.actor_id !== actorId) continue;
+    if (payoutActorForSubscription(subscription, customerActorById, linksById) !== actorId) continue;
 
     let commissionBase: number;
     let paymentDate: string | null = null;
@@ -588,13 +611,24 @@ export function computeActorPayoutDetail(actorId: string, period: string, subscr
  * landed this period across the actor's subscriptions) and doesn't drive
  * the commission math for annual plans.
  */
-export function computeActorPayout(actorId: string, period: string, subscriptions: Subscription[], payments: Payment[], rates: CommissionRate[]) {
-  const items = computeActorPayoutDetail(actorId, period, subscriptions, payments, rates);
+export function computeActorPayout(
+  actorId: string,
+  period: string,
+  subscriptions: Subscription[],
+  payments: Payment[],
+  rates: CommissionRate[],
+  attribution: PayoutAttributionContext = {},
+) {
+  const items = computeActorPayoutDetail(actorId, period, subscriptions, payments, rates, attribution);
+  const customerActorById = new Map((attribution.customers ?? []).map((customer) => [customer.id, customer.acquisition_actor_id]));
+  const linksById = new Map((attribution.links ?? []).map((link) => [link.id, link]));
+  const subscriptionById = new Map(subscriptions.map((subscription) => [subscription.id, subscription]));
 
   let grossReceived = 0;
   for (const payment of payments) {
     if (!isPaidStatus(payment.status) || paymentPeriod(payment) !== period) continue;
-    if (payment.subscription_id && subscriptions.some((subscription) => subscription.id === payment.subscription_id && subscription.actor_id === actorId)) {
+    const subscription = payment.subscription_id ? subscriptionById.get(payment.subscription_id) : null;
+    if (subscription && payoutActorForSubscription(subscription, customerActorById, linksById) === actorId) {
       grossReceived += Number(payment.value);
     }
   }
